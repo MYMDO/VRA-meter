@@ -170,13 +170,14 @@ ESR-VRA-meter/
 
 ### Key Design Decisions
 
-- **Bit-banged I2C** instead of Wire library — deterministic timing, no interrupt conflicts, portable across AVR boards
+- **Direct-port bit-banged I2C** — ATmega328P PORTC manipulation (`sdaHigh()`, `sclLow()`) achieves ~200kHz clock, vs ~20kHz with `digitalWrite`. No Wire library, no interrupt conflicts
 - **Single-shot mode** (860 SPS) — one conversion per read, no continuous streaming overhead
 - **No external libraries** — pure Arduino core, zero `#include` beyond `<Arduino.h>` and `<math.h>`
 - **All config in one file** — every tunable parameter lives in `config.h`
 - **PROGMEM log table** — pre-computed `ln(10)..ln(300)` in flash, avoiding 30 expensive `log()` calls on the FPU-less ATmega328P
 - **Centered regression** — voltage data is centered (`ΔV = V[i] - V[0]`) before R² calculation to prevent catastrophic cancellation in 32-bit float
 - **Zero-delay V_instant** — no software delay after MOSFET off; the ADS1115's 1.16ms integration window naturally filters inductive ringing
+- **Start-before-wait ADC timing** — conversion starts ~2ms before target read time, runs in parallel with the busy-wait, ensuring samples are precisely aligned to the 10ms grid
 
 ## Installation
 

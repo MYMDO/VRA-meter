@@ -78,19 +78,33 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     unsigned long t_start = millis();
     digitalWrite(MOSFET_PIN, HIGH); // MOSFET OFF → load disconnected
     
-    // NO delay here — ADS1115 at 860 SPS integrates over ~1.16 ms,
-    // which naturally filters inductive ringing from MOSFET switching.
-    // Any software delay would let chemical relaxation start, corrupting R_ohm.
-    result.V_after = adc.readVoltage();
+    // Start first conversion immediately — ADS1115 integrates ~1.16ms,
+    // naturally filtering inductive ringing from MOSFET switching.
+    adc.startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
+    delay(3); // Wait for conversion to complete
+    result.V_after = adc.readResult(FS_4096V);
     
-    // Collect relaxation samples
-    unsigned long elapsed;
+    // Collect relaxation samples with precise timing
+    // Strategy: start conversion ~2ms before target, read at target time
+    // This ensures the ADS1115 integration window is centered on the target
     for (int i = 0; i < RELAX_SAMPLES; i++) {
         unsigned long target = (unsigned long)((i + 1) * RELAX_SAMPLE_STEP_MS);
-        while ((elapsed = millis() - t_start) < target) {
-            // busy-wait for precise timing
+        
+        // Start conversion early — I2C write takes ~1ms, integration takes ~1.16ms
+        // Total: ~2.2ms, so start at target - 2ms
+        unsigned long start_at = (target > 2) ? target - 2 : 0;
+        while ((millis() - t_start) < start_at) {
+            // busy-wait until it's time to start conversion
         }
-        voltage_[i] = adc.readVoltage();
+        adc.startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
+        
+        // Wait until target time for read
+        while ((millis() - t_start) < target) {
+            // busy-wait
+        }
+        
+        // Read the completed result (fast I2C read, ~1ms)
+        voltage_[i] = adc.readResult(FS_4096V);
     }
     
     // Final relaxed voltage (last sample)
