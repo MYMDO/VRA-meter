@@ -14,10 +14,10 @@
 #define SCL_BIT   5
 
 // Minimal I2C delay — one NOP = 62.5ns at 16MHz
-// 4 NOPs ≈ 250ns per half-period → ~200kHz clock
+// I2C_NOP_COUNT NOPs ≈ 250ns per half-period → ~200kHz clock
 #define I2C_NOP() __asm__ __volatile__("nop\n\tnop\n\tnop\n\tnop")
 
-void ADS1115::sdaHigh() { SDA_DDR &= ~(1 << SDA_BIT); }  // input = pull-up
+void ADS1115::sdaHigh() { SDA_DDR &= ~(1 << SDA_BIT); }
 void ADS1115::sdaLow()  { SDA_DDR |= (1 << SDA_BIT); SDA_PORT &= ~(1 << SDA_BIT); }
 void ADS1115::sdaInput(){ SDA_DDR &= ~(1 << SDA_BIT); }
 void ADS1115::sclHigh() { SCL_DDR &= ~(1 << SCL_BIT); }
@@ -129,14 +129,14 @@ float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
 
 void ADS1115::startConversion(uint8_t channel, uint16_t pga) {
     uint16_t mux = (channel == 0) ? MUX_A0_A1 : MUX_A2_A3;
-    
+
     uint16_t config = ADS1115_CFG_OS
                     | mux
                     | pga
                     | ADS1115_CFG_MODE_SINGLE
                     | ADS1115_CFG_RATE_860
                     | ADS1115_CFG_COMP_QUE;
-    
+
     writeRegister(ADS1115_REG_CONFIG, config);
     // Conversion starts immediately after I2C write completes (~1ms)
     // Takes ~1.16ms at 860 SPS → ready in ~2.2ms from now
