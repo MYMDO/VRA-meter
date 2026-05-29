@@ -18,7 +18,7 @@ All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C
 
 ## Key cross-file dependency
 
-`vra.cpp:6` declares `extern ADS1115 adc;` — it references the global `adc` object from the `.ino` file. If you move or rename the `ADS1115 adc;` declaration, update the extern.
+`vra.cpp:10` declares `extern ADS1115 adc;` — it references the global `adc` object from the `.ino` file. If you move or rename the `ADS1115 adc;` declaration, update the extern.
 
 ## MOSFET logic is active-low
 
@@ -27,6 +27,18 @@ All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C
 ## Config lives in config.h
 
 Every tunable parameter (pins, PGA gains, timing, thresholds) is in `config.h`. Do not hardcode values in `.cpp` files.
+
+## PROGMEM log table
+
+`vra.h:8` exports `LOG_TIME[30]` — pre-computed `ln(10)..ln(300)` stored in flash via `PROGMEM`. Read with `pgm_read_float(&LOG_TIME[i])`. Do not replace with runtime `log()` calls — ATmega328P has no FPU, each `log()` costs ~500µs.
+
+## Centered regression (float precision fix)
+
+R² is computed on **centered** voltage data: `ΔV[i] = V[i] - V[0]`. This prevents catastrophic cancellation in the variance formula on 32-bit float (7 significant digits). Never compute R² on raw ~3.85V values — the result will be garbage.
+
+## V_instant: no delay after MOSFET off
+
+`vra.cpp:83` reads V_instant immediately after `digitalWrite(MOSFET_PIN, HIGH)`. Do NOT add a delay here. The ADS1115 at 860 SPS integrates over ~1.16ms, naturally filtering inductive ringing. Any delay lets chemical relaxation start, corrupting R_ohm.
 
 ## No automated tests
 
@@ -45,5 +57,8 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 
 - Changing `SHUNT_RESISTANCE` in config.h without updating the physical resistor
 - Using Wire library instead of the bit-banged I2C in ads1115.cpp
-- Forgetting `F()` macro on string literals ( AVR RAM is 2KB)
+- Forgetting `F()` macro on string literals (AVR RAM is 2KB)
 - Moving MOSFET pin without updating both `config.h` and the pin init in `.ino:99-100`
+- Adding delay between MOSFET off and V_instant read
+- Computing R² on raw voltage instead of centered ΔV
+- Using runtime `log()` instead of PROGMEM `LOG_TIME` array

@@ -60,7 +60,8 @@ The entire measurement takes under 400ms and requires no user expertise — the 
    ▼
 3. REMOVE LOAD
    │
-   ├─ T=0ms:   Record V_instant (for R_ohm)
+   ├─ T=0ms:   Record V_instant immediately (ADS1115 integrates ~1.16ms,
+   │            naturally filtering inductive ringing — no software delay)
    │
    ├─ T=10ms:  ─┐
    ├─ T=20ms:   │ Record 30 voltage samples
@@ -72,7 +73,7 @@ The entire measurement takes under 400ms and requires no user expertise — the 
 4. CALCULATE
    │  R_ohm  = (V_instant - V_load) / I_load
    │  R_pol  = (V_final - V_instant) / I_load
-   │  R²     = log_regression_fit(V vs ln(t))
+   │  R²     = log_regression_fit(ΔV vs ln(t))  [centered data]
    │
    ▼
 5. OUTPUT RESULT + SOH GRADE
@@ -173,12 +174,15 @@ ESR-VRA-meter/
 - **Single-shot mode** (860 SPS) — one conversion per read, no continuous streaming overhead
 - **No external libraries** — pure Arduino core, zero `#include` beyond `<Arduino.h>` and `<math.h>`
 - **All config in one file** — every tunable parameter lives in `config.h`
+- **PROGMEM log table** — pre-computed `ln(10)..ln(300)` in flash, avoiding 30 expensive `log()` calls on the FPU-less ATmega328P
+- **Centered regression** — voltage data is centered (`ΔV = V[i] - V[0]`) before R² calculation to prevent catastrophic cancellation in 32-bit float
+- **Zero-delay V_instant** — no software delay after MOSFET off; the ADS1115's 1.16ms integration window naturally filters inductive ringing
 
 ## Installation
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/ESR-VRA-meter.git
+   git clone https://github.com/MYMDO/ESR-VRA-meter.git
    ```
 
 2. **Open in Arduino IDE:**
@@ -318,9 +322,18 @@ This represents the combined resistance of charge transfer at the electrode surf
 
 The coefficient of determination (R²) measures how well the 30 relaxation voltage samples fit the ideal logarithmic model `V(t) = A × ln(t) + B`.
 
-The regression is performed on the transformed data where:
-- X-axis: `ln(t)` where `t` is time in ms after load removal
-- Y-axis: measured voltage `V(t)`
+**Centered regression for float precision:**
+On 8-bit AVR (no FPU), 32-bit `float` has only 7 significant digits. Raw voltage values (~3.85V) cause catastrophic cancellation in the variance formula `S_yy = Σy² - (Σy)²/n` — two nearly equal large numbers subtracted, destroying all precision.
+
+The fix: center the data by subtracting the first sample:
+```
+ΔV[i] = V[i] - V[0]     // range: 0.000 .. 0.010 V
+```
+Now `ΔV` values are small, and the variance calculation preserves all 7 digits of mantissa.
+
+The regression is performed on:
+- X-axis: `ln(t)` from PROGMEM constant array (pre-computed, no runtime `log()`)
+- Y-axis: centered voltage `ΔV(t)`
 
 A perfect fit gives R² = 1.0. Deviations indicate structural problems inside the cell.
 
@@ -372,7 +385,6 @@ All parameters are in `config.h`:
 | `RELAX_SAMPLES` | `30` | Number of voltage samples during relaxation |
 | `RELAX_SAMPLE_STEP_MS` | `10` ms | Time between relaxation samples |
 | `PRE_PULSE_SETTLE_MS` | `50` ms | Settling time before first reading |
-| `POST_PULSE_DELAY_MS` | `5` ms | Delay after MOSFET off before first sample |
 
 ### Safety Thresholds
 
@@ -402,6 +414,7 @@ The load resistor determines the discharge current. For a 3.7V Li-ion cell:
 | `UNDERVOLTAGE` message | Battery below 2.5V or not connected | Check wiring, charge battery |
 | `OVERVOLTAGE` message | Battery above 4.3V | Disconnect immediately, check cell |
 | R_ohm = 0 mΩ | Current too low to measure | Use smaller load resistor |
+| R_ohm too low / R_pol too high | Software delay before V_instant | Verify no delay between MOSFET off and first ADC read (fixed in firmware) |
 | R² very low (< 0.9) | Battery damaged or wrong timing | Check MOSFET switching, verify cell |
 | Erratic readings | I2C noise, loose connections | Shorten wires, add 100nF cap on ADS1115 VDD |
 | ADS1115 not responding | Wrong I2C address or wiring | Verify SDA/SCL connections, check ADDR pin |
@@ -423,6 +436,8 @@ V(t) = A × ln(t) + B
 ```
 
 This relationship has been validated extensively in academic literature and is the basis for commercial battery characterization tools. The R² goodness-of-fit metric captures how closely a real battery follows this ideal behavior.
+
+**Implementation note:** The `ln(t)` values are pre-computed at compile time and stored in AVR flash (PROGMEM) — 30 calls to `log()` on the ATmega328P would cost ~15ms of CPU time with no hardware FPU.
 
 ### Comparison to EIS
 
