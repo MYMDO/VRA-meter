@@ -147,16 +147,27 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
         centered_v[i] = voltage_[i] - voltage_[0];
     }
     
-    float a_coeff, b_coeff;
-    result.R_squared = calculateR2Centered(LOG_TIME, centered_v, RELAX_SAMPLES, a_coeff, b_coeff);
-    
-    // SOH grade based on R²
-    if (result.R_squared > SOH_EXCELLENT) {
-        result.soh_grade = 2; // Excellent
-    } else if (result.R_squared > SOH_GOOD) {
-        result.soh_grade = 1; // Good
+    // QUANTIZATION GUARD: If relaxation amplitude is too small,
+    // the signal is below ADC resolution → R² is meaningless.
+    // At PGA_6144V, 1 LSB = 187.5µV. If ΔV_pol < 4mV (~21 LSB),
+    // the battery is physically excellent — skip regression.
+    #define MIN_RELAX_MV  4.0f  // minimum relaxation amplitude for valid R²
+    float abs_relax = fabs(result.V_relaxation);
+    if (abs_relax < (MIN_RELAX_MV / 1000.0f)) {
+        result.R_squared = 1.0f;  // too small to measure → perfect
+        result.soh_grade = 2;     // EXCELLENT
     } else {
-        result.soh_grade = 0; // Poor
+        float a_coeff, b_coeff;
+        result.R_squared = calculateR2Centered(LOG_TIME, centered_v, RELAX_SAMPLES, a_coeff, b_coeff);
+        
+        // SOH grade based on R²
+        if (result.R_squared > SOH_EXCELLENT) {
+            result.soh_grade = 2; // Excellent
+        } else if (result.R_squared > SOH_GOOD) {
+            result.soh_grade = 1; // Good
+        } else {
+            result.soh_grade = 0; // Poor
+        }
     }
     
     return true;

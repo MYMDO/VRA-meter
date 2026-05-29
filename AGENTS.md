@@ -24,9 +24,9 @@ All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C
 
 `D7 LOW` = load ON, `D7 HIGH` = load OFF. Confusing if you expect standard logic. See `config.h:5`.
 
-## Pull-down resistor on MOSFET gate (HARDWARE REQUIRED)
+## Pull-up resistor on MOSFET gate (HARDWARE REQUIRED)
 
-A **10kΩ resistor from gate to GND is mandatory**. During Arduino boot, all pins are high-impedance INPUT for ~50ms. Without the pull-down, the gate floats and the MOSFET may partially turn on, dumping full battery current through the load. This is a hardware safety requirement — no software can fully compensate for a floating gate.
+A **10kΩ resistor from gate to 5V is mandatory**. During Arduino boot, all pins are high-impedance INPUT for ~50ms. With active-low logic (LOW=ON, HIGH=OFF), the gate must be pulled HIGH to keep the load OFF. A pull-down to GND would turn the load ON during boot — dangerous.
 
 ## Config lives in config.h
 

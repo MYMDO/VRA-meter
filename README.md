@@ -91,12 +91,12 @@ The entire measurement takes under 400ms and requires no user expertise — the 
 | Shunt Resistor | 0.1 Ω, 1W | Axial | Current sense |
 | Load Resistor | 10 Ω, 5W | Wirewound | Adjustable — see [Choosing Load Resistor](#choosing-load-resistor) |
 | Battery Holder | — | — | For cell under test |
-| Pull-up Resistors | 4.7 kΩ | 0805 | For I2C (often on ADS1115 board) |
-| **Pull-down Resistor** | **10 kΩ** | 0805 | **REQUIRED on MOSFET gate to GND — prevents spurious ON during Arduino boot** |
+| Pull-up Resistors | 4.7 kΩ | 0805 | **External** pull-ups on SDA/SCL to 5V — REQUIRED for 200kHz I2C |
+| **Pull-up Resistor** | **10 kΩ** | 0805 | **REQUIRED on MOSFET gate to 5V — keeps MOSFET OFF during Arduino boot** |
 
 **Total component count: 7** (excluding Arduino and battery holder)
 
-> **CRITICAL:** The 10kΩ pull-down resistor on the MOSFET gate is mandatory. During Arduino boot (first ~50ms), all pins are high-impedance INPUT. Without this resistor, the gate floats and the MOSFET may partially turn on, dumping full battery current through the load resistor.
+> **CRITICAL:** The 10kΩ pull-up resistor on the MOSFET gate to 5V is mandatory. During Arduino boot (first ~50ms), all pins are high-impedance INPUT. With active-low MOSFET logic (LOW=ON, HIGH=OFF), the gate must be pulled HIGH to keep the load OFF. A pull-down to GND would turn the load ON during boot — dangerous.
 
 ### Schematic
 
@@ -179,8 +179,10 @@ ESR-VRA-meter/
 - **All config in one file** — every tunable parameter lives in `config.h`
 - **PROGMEM log table** — pre-computed `ln(10)..ln(300)` in flash, avoiding 30 expensive `log()` calls on the FPU-less ATmega328P
 - **Centered regression** — voltage data is centered (`ΔV = V[i] - V[0]`) before R² calculation to prevent catastrophic cancellation in 32-bit float
+- **Quantization guard** — if relaxation amplitude < 4mV (below ADC resolution at 187.5µV/LSB), R² is skipped and battery is marked EXCELLENT
 - **Zero-delay V_instant** — no software delay after MOSFET off; the ADS1115's 1.16ms integration window naturally filters inductive ringing
 - **Start-before-wait ADC timing** — conversion starts ~2ms before target read time, runs in parallel with the busy-wait, ensuring samples are precisely aligned to the 10ms grid
+- **Safety timeout** — 2-second hard limit in `measure()`, kills MOSFET on any I2C hang
 
 ## Installation
 

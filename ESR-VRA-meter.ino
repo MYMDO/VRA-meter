@@ -96,8 +96,11 @@ void setup() {
     Serial.begin(115200);
     while (!Serial) { ; }
     
+    // Glitch-free MOSFET init: enable internal pull-up (weak HIGH) first,
+    // then switch to OUTPUT. This prevents a brief LOW→HIGH transition
+    // that would momentarily turn on the load.
+    digitalWrite(MOSFET_PIN, HIGH);
     pinMode(MOSFET_PIN, OUTPUT);
-    digitalWrite(MOSFET_PIN, HIGH); // Load OFF initially
     
     adc.begin();
     vra.begin();
