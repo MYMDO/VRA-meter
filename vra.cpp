@@ -67,6 +67,11 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
         return false;
     }
     
+    // Safety timeout — if anything hangs, kill MOSFET within 2 seconds
+    // Normal measurement takes ~350ms (50ms settle + 3ms V_after + 300ms relaxation)
+    unsigned long safety_start = millis();
+    #define SAFETY_TIMEOUT_MS 2000
+    
     // --- Phase 1: Measure steady-state voltage under load ---
     digitalWrite(MOSFET_PIN, LOW);  // MOSFET ON → load connected
     delay(PRE_PULSE_SETTLE_MS);     // Let voltage settle under load
@@ -82,7 +87,7 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     // naturally filtering inductive ringing from MOSFET switching.
     adc.startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
     delay(3); // Wait for conversion to complete
-    result.V_after = adc.readResult(FS_4096V);
+    result.V_after = adc.readResult(FS_6144V);
     
     // Collect relaxation samples with precise timing
     // Strategy: start conversion ~2ms before target, read at target time
@@ -94,17 +99,23 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
         // Total: ~2.2ms, so start at target - 2ms
         unsigned long start_at = (target > 2) ? target - 2 : 0;
         while ((millis() - t_start) < start_at) {
-            // busy-wait until it's time to start conversion
+            if (millis() - safety_start > SAFETY_TIMEOUT_MS) {
+                digitalWrite(MOSFET_PIN, HIGH); // FAILSAFE: kill load
+                return false;
+            }
         }
         adc.startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
         
         // Wait until target time for read
         while ((millis() - t_start) < target) {
-            // busy-wait
+            if (millis() - safety_start > SAFETY_TIMEOUT_MS) {
+                digitalWrite(MOSFET_PIN, HIGH); // FAILSAFE: kill load
+                return false;
+            }
         }
         
         // Read the completed result (fast I2C read, ~1ms)
-        voltage_[i] = adc.readResult(FS_4096V);
+        voltage_[i] = adc.readResult(FS_6144V);
     }
     
     // Final relaxed voltage (last sample)

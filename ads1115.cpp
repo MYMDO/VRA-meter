@@ -153,5 +153,5 @@ float ADS1115::readCurrent() {
 }
 
 float ADS1115::readVoltage() {
-    return readDifferential(ADS1115_CH_VOLTAGE, VOLTAGE_PGA, FS_4096V);
+    return readDifferential(ADS1115_CH_VOLTAGE, VOLTAGE_PGA, FS_6144V);
 }

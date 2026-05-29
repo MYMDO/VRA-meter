@@ -21,12 +21,13 @@
 
 // For current channel: ±256 mV range (max precision on shunt)
 #define CURRENT_PGA  PGA_0256V
-// For voltage channel: ±4.096 V range (covers up to 4.2V Li-ion)
-#define VOLTAGE_PGA  PGA_4096V
+// For voltage channel: ±6.144 V range (covers up to 4.25V Li-ion full charge)
+// PGA_4096V would saturate at 4.096V — unsafe for fully charged 18650
+#define VOLTAGE_PGA  PGA_6144V
 
 // ADS1115 full-scale voltages for each PGA setting
 #define FS_0256V  0.256f
-#define FS_4096V  4.096f
+#define FS_6144V  6.144f
 
 // --- Shunt Resistor ---
 #define SHUNT_RESISTANCE  0.1f   // Ohms
