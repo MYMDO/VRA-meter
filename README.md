@@ -92,8 +92,11 @@ The entire measurement takes under 400ms and requires no user expertise — the 
 | Load Resistor | 10 Ω, 5W | Wirewound | Adjustable — see [Choosing Load Resistor](#choosing-load-resistor) |
 | Battery Holder | — | — | For cell under test |
 | Pull-up Resistors | 4.7 kΩ | 0805 | For I2C (often on ADS1115 board) |
+| **Pull-down Resistor** | **10 kΩ** | 0805 | **REQUIRED on MOSFET gate to GND — prevents spurious ON during Arduino boot** |
 
-**Total component count: 6** (excluding Arduino and battery holder)
+**Total component count: 7** (excluding Arduino and battery holder)
+
+> **CRITICAL:** The 10kΩ pull-down resistor on the MOSFET gate is mandatory. During Arduino boot (first ~50ms), all pins are high-impedance INPUT. Without this resistor, the gate floats and the MOSFET may partially turn on, dumping full battery current through the load resistor.
 
 ### Schematic
 
