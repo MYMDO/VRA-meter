@@ -40,9 +40,6 @@
 #define RELAX_SAMPLE_STEP_MS 10    // Interval between relaxation samples (ms)
 #define PRE_PULSE_SETTLE_MS  50    // Wait before pulse for ADC settling
 
-// --- I2C Timing ---
-#define I2C_DELAY_US  2
-
 // --- Battery Thresholds ---
 #define BATTERY_MIN_V   2.5f   // Minimum voltage to allow test (V)
 #define BATTERY_MAX_V   4.3f   // Maximum voltage (overvoltage protection)

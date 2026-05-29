@@ -1,84 +1,96 @@
 #include "ads1115.h"
 #include <Arduino.h>
 
-// I2C pins - adjust to your board
-#define SDA_PIN  A4
-#define SCL_PIN  A5
+// Direct port manipulation for ATmega328P
+// A4 = SDA = PC4, A5 = SCL = PC5
+#define SDA_DDR   DDRC
+#define SDA_PORT  PORTC
+#define SDA_PINR  PINC
+#define SDA_BIT   4
+
+#define SCL_DDR   DDRC
+#define SCL_PORT  PORTC
+#define SCL_PINR  PINC
+#define SCL_BIT   5
+
+// Minimal I2C delay — one NOP = 62.5ns at 16MHz
+// 4 NOPs ≈ 250ns per half-period → ~200kHz clock
+#define I2C_NOP() __asm__ __volatile__("nop\n\tnop\n\tnop\n\tnop")
+
+void ADS1115::sdaHigh() { SDA_DDR &= ~(1 << SDA_BIT); }  // input = pull-up
+void ADS1115::sdaLow()  { SDA_DDR |= (1 << SDA_BIT); SDA_PORT &= ~(1 << SDA_BIT); }
+void ADS1115::sdaInput(){ SDA_DDR &= ~(1 << SDA_BIT); }
+void ADS1115::sclHigh() { SCL_DDR &= ~(1 << SCL_BIT); }
+void ADS1115::sclLow()  { SCL_DDR |= (1 << SCL_BIT); SCL_PORT &= ~(1 << SCL_BIT); }
+void ADS1115::sclInput(){ SCL_DDR &= ~(1 << SCL_BIT); }
+bool ADS1115::sdaRead() { return SDA_PINR & (1 << SDA_BIT); }
 
 void ADS1115::begin() {
-    pinMode(SDA_PIN, INPUT_PULLUP);
-    pinMode(SCL_PIN, INPUT_PULLUP);
-    digitalWrite(SDA_PIN, HIGH);
-    digitalWrite(SCL_PIN, HIGH);
+    sdaHigh();
+    sclHigh();
     i2cStop();
 }
 
-void ADS1115::i2cDelay() {
-    delayMicroseconds(I2C_DELAY_US);
-}
-
 void ADS1115::i2cStart() {
-    digitalWrite(SDA_PIN, HIGH);
-    pinMode(SDA_PIN, OUTPUT);
-    i2cDelay();
-    digitalWrite(SCL_PIN, HIGH);
-    pinMode(SCL_PIN, OUTPUT);
-    i2cDelay();
-    digitalWrite(SDA_PIN, LOW);
-    i2cDelay();
+    sdaLow();
+    I2C_NOP();
+    sclLow();
+    I2C_NOP();
 }
 
 void ADS1115::i2cStop() {
-    digitalWrite(SDA_PIN, LOW);
-    pinMode(SDA_PIN, OUTPUT);
-    i2cDelay();
-    digitalWrite(SCL_PIN, HIGH);
-    pinMode(SCL_PIN, INPUT);
-    i2cDelay();
-    digitalWrite(SDA_PIN, HIGH);
-    pinMode(SDA_PIN, INPUT);
-    i2cDelay();
+    sdaLow();
+    I2C_NOP();
+    sclHigh();
+    I2C_NOP();
+    sdaHigh();
+    I2C_NOP();
 }
 
 void ADS1115::i2cWriteByte(uint8_t data) {
     for (int i = 7; i >= 0; i--) {
-        digitalWrite(SDA_PIN, (data >> i) & 1);
-        i2cDelay();
-        digitalWrite(SCL_PIN, HIGH);
-        i2cDelay();
-        digitalWrite(SCL_PIN, LOW);
-        i2cDelay();
+        if (data & (1 << i))
+            sdaHigh();
+        else
+            sdaLow();
+        I2C_NOP();
+        sclHigh();
+        I2C_NOP();
+        sclLow();
+        I2C_NOP();
     }
     // ACK
-    pinMode(SDA_PIN, INPUT);
-    i2cDelay();
-    digitalWrite(SCL_PIN, HIGH);
-    i2cDelay();
-    digitalWrite(SCL_PIN, LOW);
-    i2cDelay();
-    pinMode(SDA_PIN, OUTPUT);
+    sdaInput();
+    I2C_NOP();
+    sclHigh();
+    I2C_NOP();
+    sclLow();
+    I2C_NOP();
+    sdaHigh(); // release
 }
 
 uint8_t ADS1115::i2cReadByte(bool ack) {
     uint8_t data = 0;
-    pinMode(SDA_PIN, INPUT);
+    sdaInput();
     for (int i = 7; i >= 0; i--) {
-        digitalWrite(SCL_PIN, HIGH);
-        i2cDelay();
-        if (digitalRead(SDA_PIN)) data |= (1 << i);
-        i2cDelay();
-        digitalWrite(SCL_PIN, LOW);
-        i2cDelay();
+        sclHigh();
+        I2C_NOP();
+        if (sdaRead()) data |= (1 << i);
+        I2C_NOP();
+        sclLow();
+        I2C_NOP();
     }
     // ACK/NAK
-    digitalWrite(SDA_PIN, ack ? LOW : HIGH);
-    pinMode(SDA_PIN, OUTPUT);
-    i2cDelay();
-    digitalWrite(SCL_PIN, HIGH);
-    i2cDelay();
-    digitalWrite(SCL_PIN, LOW);
-    i2cDelay();
-    pinMode(SDA_PIN, INPUT);
+    if (ack)
+        sdaLow();
+    else
+        sdaHigh();
+    I2C_NOP();
+    sclHigh();
+    I2C_NOP();
+    sclLow();
+    I2C_NOP();
+    sdaHigh(); // release
     return data;
 }
 
@@ -104,12 +116,19 @@ uint16_t ADS1115::readRegister(uint8_t reg) {
 }
 
 float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
-    uint16_t mux;
-    if (channel == 0) {
-        mux = MUX_A0_A1;
-    } else {
-        mux = MUX_A2_A3;
+    startConversion(channel, pga);
+    delay(2); // 860 SPS → 1.16ms, give 0.84ms margin
+    // Poll for completion
+    uint16_t attempts = 0;
+    while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {
+        delay(1);
+        if (++attempts > 100) break;
     }
+    return readResult(fs);
+}
+
+void ADS1115::startConversion(uint8_t channel, uint16_t pga) {
+    uint16_t mux = (channel == 0) ? MUX_A0_A1 : MUX_A2_A3;
     
     uint16_t config = ADS1115_CFG_OS
                     | mux
@@ -119,23 +138,13 @@ float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
                     | ADS1115_CFG_COMP_QUE;
     
     writeRegister(ADS1115_REG_CONFIG, config);
-    
-    // Wait for conversion (860 SPS ≈ 1.2 ms, give 2 ms margin)
-    delay(2);
-    
-    // Poll for completion (OS bit goes high when done)
-    uint16_t attempts = 0;
-    while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {
-        delay(1);
-        if (++attempts > 100) break; // timeout
-    }
-    
+    // Conversion starts immediately after I2C write completes (~1ms)
+    // Takes ~1.16ms at 860 SPS → ready in ~2.2ms from now
+}
+
+float ADS1115::readResult(float fs) {
     int16_t raw = (int16_t)readRegister(ADS1115_REG_CONVERSION);
-    
-    // Convert to voltage: (raw / 32767.0) * full_scale
-    float voltage = ((float)raw / 32767.0f) * fs;
-    
-    return voltage;
+    return ((float)raw / 32767.0f) * fs;
 }
 
 float ADS1115::readCurrent() {

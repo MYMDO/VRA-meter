@@ -14,7 +14,7 @@ Or open `ESR-VRA-meter.ino` in Arduino IDE, select board, upload. The `.ino` fil
 
 ## Zero external dependencies
 
-All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C is bit-banged (not Wire library) — hardcoded to A4/A5 in `ads1115.cpp:5-6`.
+All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C is bit-banged (not Wire library) — uses direct port manipulation on ATmega328P (PORTC, A4/A5) in `ads1115.cpp:11-20`.
 
 ## Key cross-file dependency
 
@@ -40,6 +40,20 @@ R² is computed on **centered** voltage data: `ΔV[i] = V[i] - V[0]`. This preve
 
 `vra.cpp:83` reads V_instant immediately after `digitalWrite(MOSFET_PIN, HIGH)`. Do NOT add a delay here. The ADS1115 at 860 SPS integrates over ~1.16ms, naturally filtering inductive ringing. Any delay lets chemical relaxation start, corrupting R_ohm.
 
+## I2C: direct port manipulation (not digitalWrite)
+
+`ads1115.cpp` uses direct PORTC manipulation for I2C — `sdaHigh()`, `sclLow()`, etc. (lines 11-20). This achieves ~200kHz clock vs ~20kHz with `digitalWrite`. Do NOT replace with `digitalWrite()` — it's 10x slower and will break the 10ms sample timing.
+
+## ADC timing: start-before-wait pattern
+
+Relaxation samples use non-overlapping conversion: start conversion ~2ms before target time, then read at target. See `vra.cpp:91-103`. The sequence is:
+1. Wait until `target - 2ms`
+2. Call `adc.startConversion()` (I2C write + conversion starts)
+3. Wait until `target` (conversion completes in parallel)
+4. Call `adc.readResult()` (fast I2C read)
+
+Do NOT call `adc.readVoltage()` in the relaxation loop — it starts conversion AFTER the wait, offsetting all samples by ~4ms.
+
 ## No automated tests
 
 Verification is manual: upload to board, open Serial Monitor at 115200 baud, connect battery, send any character to trigger measurement. R² output confirms the algorithm works.
@@ -50,7 +64,7 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 |------|---------|
 | `ESR-VRA-meter.ino` | Entry point, serial UI, measurement loop |
 | `config.h` | All hardware/tuning constants |
-| `ads1115.h/.cpp` | Bit-banged I2C driver for ADS1115 ADC |
+| `ads1115.h/.cpp` | Bit-banged I2C driver (direct port, ~200kHz) for ADS1115 ADC |
 | `vra.h/.cpp` | VRA analysis: R², logarithmic regression, SOH grading |
 
 ## Common mistakes to avoid
@@ -62,3 +76,5 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 - Adding delay between MOSFET off and V_instant read
 - Computing R² on raw voltage instead of centered ΔV
 - Using runtime `log()` instead of PROGMEM `LOG_TIME` array
+- Using `digitalWrite()` for I2C — use direct port manipulation (see ads1115.cpp)
+- Calling `adc.readVoltage()` in relaxation loop — use startConversion/readResult pattern
