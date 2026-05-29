@@ -7,10 +7,10 @@ Arduino sketch (ATmega328P). No build system, no package manager, no test framew
 ## Compile command
 
 ```bash
-arduino-cli compile --fqbn arduino:avr:uno ESR-VRA-meter.ino
+arduino-cli compile --fqbn arduino:avr:uno VRA-meter.ino
 ```
 
-Or open `ESR-VRA-meter.ino` in Arduino IDE, select board, upload. The `.ino` filename **must** match the directory name.
+Or open `VRA-meter.ino` in Arduino IDE, select board, upload. The `.ino` filename **must** match the directory name.
 
 ## Zero external dependencies
 
@@ -66,7 +66,7 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 
 | File | Purpose |
 |------|---------|
-| `ESR-VRA-meter.ino` | Entry point, serial UI, measurement loop |
+| `VRA-meter.ino` | Entry point, serial UI, measurement loop |
 | `config.h` | All hardware/tuning constants |
 | `ads1115.h/.cpp` | Bit-banged I2C driver (direct port, ~200kHz) for ADS1115 ADC |
 | `vra.h/.cpp` | VRA analysis: R², logarithmic regression, SOH grading |
