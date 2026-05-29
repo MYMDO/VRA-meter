@@ -16,7 +16,7 @@ void printSeparator() {
 void printBanner() {
     Serial.println();
     printSeparator();
-    Serial.println(F("  ESR-VRA Meter v1.0"));
+    Serial.println(F("  VRA Meter v1.0"));
     Serial.println(F("  Voltage Relaxation Analysis"));
     Serial.println(F("  Single-pulse battery diagnostics"));
     printSeparator();

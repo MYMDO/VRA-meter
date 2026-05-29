@@ -1,4 +1,4 @@
-# ESR-VRA Meter
+# VRA Meter
 
 **Arduino-based battery diagnostics using Voltage Relaxation Analysis (VRA)**
 
@@ -38,7 +38,7 @@ A minimalist hardware, maximum intelligence software approach to measuring batte
 
 Traditional battery testers rely on complex hardware — multiple current sources, precision amplifiers, dedicated fuel gauge ICs. This project flips the paradigm: **minimize the hardware, maximize the software intelligence**.
 
-The ESR-VRA Meter uses **Voltage Relaxation Analysis** — the same technique used in advanced BMS systems for electric vehicles — to extract three critical battery health parameters from a single 200ms current pulse:
+The VRA Meter uses **Voltage Relaxation Analysis** — the same technique used in advanced BMS systems for electric vehicles — to extract three critical battery health parameters from a single 200ms current pulse:
 
 | Parameter | What It Measures | Equivalent To |
 |-----------|-----------------|---------------|
@@ -166,8 +166,8 @@ For accurate voltage measurement, use **4-wire Kelvin sensing**:
 ## Software Architecture
 
 ```
-ESR-VRA-meter/
-├── ESR-VRA-meter.ino   Main sketch — setup, loop, serial UI
+VRA-meter/
+├── VRA-meter.ino        Main sketch — setup, loop, serial UI
 ├── config.h            Hardware pin assignments & all tunable parameters
 ├── ads1115.h           ADS1115 driver header
 ├── ads1115.cpp         Bit-banged I2C driver for ADS1115 (zero dependencies)
@@ -194,11 +194,11 @@ ESR-VRA-meter/
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/MYMDO/ESR-VRA-meter.git
+   git clone https://github.com/MYMDO/VRA-meter.git
    ```
 
 2. **Open in Arduino IDE:**
-   - File → Open → `ESR-VRA-meter/ESR-VRA-meter.ino`
+   - File → Open → `VRA-meter/VRA-meter.ino`
 
 3. **Select your board:**
    - Tools → Board → Arduino Uno (or Nano, etc.)
@@ -216,7 +216,7 @@ Open Serial Monitor at **115200 baud**. You will see:
 
 ```
 ========================================
-  ESR-VRA Meter v1.0
+  VRA Meter v1.0
   Voltage Relaxation Analysis
   Single-pulse battery diagnostics
 ========================================
