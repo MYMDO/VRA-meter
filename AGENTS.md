@@ -14,11 +14,11 @@ Or open `ESR-VRA-meter.ino` in Arduino IDE, select board, upload. The `.ino` fil
 
 ## Zero external dependencies
 
-All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C is bit-banged (not Wire library) — uses direct port manipulation on ATmega328P (PORTC, A4/A5) in `ads1115.cpp:11-20`.
+All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C is bit-banged (not Wire library) — uses direct port manipulation on ATmega328P (PORTC, A4/A5) in `ads1115.cpp:4-26`.
 
 ## Key cross-file dependency
 
-`vra.cpp:10` declares `extern ADS1115 adc;` — it references the global `adc` object from the `.ino` file. If you move or rename the `ADS1115 adc;` declaration, update the extern.
+`vra.cpp:6` declares `extern ADS1115 adc;` — it references the global `adc` object from the `.ino` file. If you move or rename the `ADS1115 adc;` declaration, update the extern.
 
 ## MOSFET logic is active-low
 
@@ -46,7 +46,7 @@ R² is computed on **centered** voltage data: `ΔV[i] = V[i] - V[0]`. This preve
 
 ## I2C: direct port manipulation (not digitalWrite)
 
-`ads1115.cpp` uses direct PORTC manipulation for I2C — `sdaHigh()`, `sclLow()`, etc. (lines 11-20). This achieves ~200kHz clock vs ~20kHz with `digitalWrite`. Do NOT replace with `digitalWrite()` — it's 10x slower and will break the 10ms sample timing.
+`ads1115.cpp` uses direct PORTC manipulation for I2C — `sdaHigh()`, `sclLow()`, etc. (lines 6-26). This achieves ~200kHz clock vs ~20kHz with `digitalWrite`. Do NOT replace with `digitalWrite()` — it's 10x slower and will break the 10ms sample timing.
 
 ## ADC timing: start-before-wait pattern
 
@@ -76,7 +76,7 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 - Changing `SHUNT_RESISTANCE` in config.h without updating the physical resistor
 - Using Wire library instead of the bit-banged I2C in ads1115.cpp
 - Forgetting `F()` macro on string literals (AVR RAM is 2KB)
-- Moving MOSFET pin without updating both `config.h` and the pin init in `.ino:99-100`
+- Moving MOSFET pin without updating both `config.h` and the pin init in `.ino:99-103`
 - Adding delay between MOSFET off and V_instant read
 - Computing R² on raw voltage instead of centered ΔV
 - Using runtime `log()` instead of PROGMEM `LOG_TIME` array

@@ -44,7 +44,7 @@ private:
     void i2cWriteByte(uint8_t data);
     uint8_t i2cReadByte(bool ack);
     
-    // Direct port manipulation for speed (~100kHz I2C)
+    // Direct port manipulation for speed (~200kHz I2C)
     inline void sdaHigh();
     inline void sdaLow();
     inline void sdaInput();

@@ -103,38 +103,42 @@ The entire measurement takes under 400ms and requires no user expertise — the 
 ```
                     Arduino Uno/Nano
                    ┌────────────────┐
-                   │            D7  ├──── Gate ────┐
-                   │            A4  ├──── SDA ─────┤
-                   │            A5  ├──── SCL ─────┤
-                   │            GND ├──── GND ────┬┤
-                   └────────────────┘              ││
-                                                   ││
-                    ADS1115 Breakout Board         ││
-                   ┌────────────────┐              ││
-              VDD ─┤ VDD        A0  ├──┐           ││
-              GND ─┤ GND        A1  ├──┤           ││
-              SDA ─┤ SDA        A2  ├──── BAT+    ││
-              SCL ─┤ SCL        A3  ├──── BAT-    ││
-                   │           VDD  ├──┐           ││
-                   │           GND  ├──┤           ││
-                   └────────────────┘  │           ││
-                                       │           ││
-                    BAT+ ──────────────┘           ││
-                    BAT- ──┬──────────────────────┘│
-                           │                       │
-                        ┌──┴──┐                    │
-                        │Shunt│ 0.1Ω              │
-                        └──┬──┘                    │
-                           │                       │
-                           ├──── A0 (via ADS1115)  │
-                           │                       │
-                          ┌┴┐                     │
-                          │ │ Load 10Ω             │
-                          │ │ 5W                   │
-                          └┬┘                     │
-                           │                       │
-                           └────────── Drain ──────┘
-                                      Source ──── GND
+                   │            D7  ├────────────────── Gate
+                   │            A4  ├────── SDA ──┬───┤
+                   │            A5  ├────── SCL ──┼───┤
+                   │            5V  ├───────┬─────┼───┤
+                   │            GND ├───────┼─────┼───┤
+                   └────────────────┘       │     │   │
+                                            │     │   │
+                   ADS1115 Breakout         │     │   │
+                   ┌────────────────┐       │     │   │
+              VDD ─┤ VDD        A0  ├──┐    │     │   │
+              GND ─┤ GND        A1  ├──┤    │     │   │
+              SDA ─┤ SDA        A2  ├──── BAT+    │   │
+              SCL ─┤ SCL        A3  ├──── BAT-    │   │
+                   │                │    │         │   │
+                   └────────────────┘    │         │   │
+                                         │         │   │
+              I2C Pull-ups:          [4.7kΩ]   [4.7kΩ] │
+              SDA → 5V (ext.)           │         │   │
+              SCL → 5V (ext.)           │         │   │
+                                         │         │   │
+                   BAT+ ─────────────────┘         │   │
+                   BAT- ──┬───────────────────────┘   │
+                          │                           │
+                       ┌──┴──┐                        │
+                       │Shunt│ 0.1Ω                   │
+                       └──┬──┘                        │
+                          │                           │
+                          ├──── A0 (via ADS1115)      │
+                          │                           │
+                         ┌┴┐                          │
+                         │ │ Load 10Ω                 │
+                         │ │ 5W                       │
+                         └┬┘                          │
+                          │                           │
+                          └───────────── Drain ───────┘
+                                     Source ──── GND
 ```
 
 ### Kelvin Connection
@@ -179,10 +183,12 @@ ESR-VRA-meter/
 - **All config in one file** — every tunable parameter lives in `config.h`
 - **PROGMEM log table** — pre-computed `ln(10)..ln(300)` in flash, avoiding 30 expensive `log()` calls on the FPU-less ATmega328P
 - **Centered regression** — voltage data is centered (`ΔV = V[i] - V[0]`) before R² calculation to prevent catastrophic cancellation in 32-bit float
-- **Quantization guard** — if relaxation amplitude < 4mV (below ADC resolution at 187.5µV/LSB), R² is skipped and battery is marked EXCELLENT
+- **PGA ±6.144V for voltage channel** — 4.2V Li-ion full charge saturates ±4.096V range; ±6.144V gives 187.5µV/LSB which is sufficient for 10-150mV relaxation signals
+- **Quantization guard** — if relaxation amplitude < 4mV (~21 LSB at 187.5µV/LSB), R² regression is skipped and battery is auto-marked EXCELLENT (signal too small to measure meaningfully)
 - **Zero-delay V_instant** — no software delay after MOSFET off; the ADS1115's 1.16ms integration window naturally filters inductive ringing
 - **Start-before-wait ADC timing** — conversion starts ~2ms before target read time, runs in parallel with the busy-wait, ensuring samples are precisely aligned to the 10ms grid
 - **Safety timeout** — 2-second hard limit in `measure()`, kills MOSFET on any I2C hang
+- **Pull-up (not pull-down) on MOSFET gate** — active-low logic (LOW=ON, HIGH=OFF) requires pull-UP to 5V; pull-down would turn load ON during Arduino boot (~50ms high-Z period)
 
 ## Installation
 
@@ -351,6 +357,8 @@ A perfect fit gives R² = 1.0. Deviations indicate structural problems inside th
 | 0.95 – 0.999 | **GOOD** | Minor aging. Possible contact oxidation or early SEI growth. |
 | < 0.95 | **POOR** | Abnormal diffusion. Suspected micro-short circuit or severe electrode damage. |
 
+**Note:** If the relaxation amplitude is below 4mV (quantization limit of ADS1115 at 187.5µV/LSB), R² is automatically set to 1.0 and graded as EXCELLENT. This prevents false negatives on high-quality batteries with very low polarization resistance.
+
 ### What Each Grade Means
 
 **EXCELLENT (R² > 0.999)**
@@ -424,6 +432,7 @@ The load resistor determines the discharge current. For a 3.7V Li-ion cell:
 | R² very low (< 0.9) | Battery damaged or wrong timing | Check MOSFET switching, verify cell |
 | Erratic readings | I2C noise, loose connections | Shorten wires, add 100nF cap on ADS1115 VDD |
 | ADS1115 not responding | Wrong I2C address or wiring | Verify SDA/SCL connections, check ADDR pin |
+| I2C bus lockup | Missing external pull-ups | Add 4.7kΩ pull-ups on SDA/SCL to 5V (internal pull-ups too weak for 200kHz) |
 
 ## Theory
 
