@@ -39,7 +39,6 @@
 #define RELAX_SAMPLES        30    // Number of voltage samples during relaxation
 #define RELAX_SAMPLE_STEP_MS 10    // Interval between relaxation samples (ms)
 #define PRE_PULSE_SETTLE_MS  50    // Wait before pulse for ADC settling
-#define POST_PULSE_DELAY_MS  5     // Small delay after MOSFET off before first sample
 
 // --- I2C Timing ---
 #define I2C_DELAY_US  2

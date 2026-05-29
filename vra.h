@@ -4,6 +4,10 @@
 #include <Arduino.h>
 #include "config.h"
 
+// Pre-computed ln(t) for t = 10, 20, 30, ... 300 ms
+// Stored in PROGMEM to save SRAM and skip runtime log() calls
+extern const float LOG_TIME[RELAX_SAMPLES] PROGMEM;
+
 // Results from a single VRA measurement cycle
 struct VRA_Result {
     float R_ohm;          // Ohmic resistance (Ω) — from instantaneous voltage jump
@@ -35,12 +39,11 @@ public:
     float getVoltageSample(uint8_t index) const;
 
 private:
-    float log_time_[RELAX_SAMPLES];
     float voltage_[RELAX_SAMPLES];
-    bool  time_initialized_;
     
-    void initTimeArray();
-    float calculateR2(const float *x, const float *y, int n, float &a, float &b);
+    // R² on centered data: delta_v[i] = voltage_[i] - voltage_[0]
+    // Avoids catastrophic cancellation on 8-bit AVR float
+    float calculateR2Centered(const float *x, const float *y, int n, float &a, float &b);
 };
 
 #endif
