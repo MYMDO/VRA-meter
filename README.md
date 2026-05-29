@@ -38,7 +38,7 @@ A minimalist hardware, maximum intelligence software approach to measuring batte
 
 Traditional battery testers rely on complex hardware — multiple current sources, precision amplifiers, dedicated fuel gauge ICs. This project flips the paradigm: **minimize the hardware, maximize the software intelligence**.
 
-The VRA Meter uses **Voltage Relaxation Analysis** — the same technique used in advanced BMS systems for electric vehicles — to extract three critical battery health parameters from a single 200ms current pulse:
+The VRA Meter uses **Voltage Relaxation Analysis** — a technique similar to approaches used or researched in advanced BMS for electric vehicles — to extract three critical battery health parameters from a single 200ms current pulse:
 
 | Parameter | What It Measures | Equivalent To |
 |-----------|-----------------|---------------|
