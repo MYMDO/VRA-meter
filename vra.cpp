@@ -5,32 +5,34 @@
 
 extern ADS1115 adc;
 
+// Pre-computed ln(t) for t = 10, 20, 30, ... 300 ms
+// Avoids expensive runtime log() on ATmega328P (no FPU)
+const float LOG_TIME[RELAX_SAMPLES] PROGMEM = {
+    2.302585, 2.995732, 3.401197, 3.688879, 3.912023,
+    4.094345, 4.248495, 4.382027, 4.499810, 4.605170,
+    4.700480, 4.787492, 4.867534, 4.941642, 5.010635,
+    5.075174, 5.135798, 5.192957, 5.247024, 5.298317,
+    5.347108, 5.393628, 5.438079, 5.480639, 5.521461,
+    5.560682, 5.598422, 5.634790, 5.669881, 5.703782
+};
+
 void VRA_Analyzer::begin() {
-    time_initialized_ = false;
-    initTimeArray();
+    // No runtime init needed — LOG_TIME is compile-time constant
 }
 
-void VRA_Analyzer::initTimeArray() {
-    for (int i = 0; i < RELAX_SAMPLES; i++) {
-        float t_ms = (float)((i + 1) * RELAX_SAMPLE_STEP_MS);
-        log_time_[i] = log(t_ms);
-    }
-    time_initialized_ = true;
-}
-
-// Linear regression on (x, y) data: y = a*x + b
-// Returns R² and the coefficients a, b
-float VRA_Analyzer::calculateR2(const float *x, const float *y, int n, float &a, float &b) {
+// R² on centered data: works with delta_v[i] = V[i] - V[0]
+// Range ~0.000..0.010 V — fits entirely within float precision (7 digits)
+// Original formula S_yy = Σy² - (Σy)²/n would lose all precision on raw ~3.85V values
+float VRA_Analyzer::calculateR2Centered(const float *x, const float *y, int n, float &a, float &b) {
     if (n < 2) return 0.0f;
     
-    float sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0, sum_y2 = 0;
+    float sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
     
     for (int i = 0; i < n; i++) {
         sum_x  += x[i];
         sum_y  += y[i];
         sum_xy += x[i] * y[i];
         sum_x2 += x[i] * x[i];
-        sum_y2 += y[i] * y[i];
     }
     
     float denom = (float)n * sum_x2 - sum_x * sum_x;
@@ -44,13 +46,13 @@ float VRA_Analyzer::calculateR2(const float *x, const float *y, int n, float &a,
     b = (sum_y - a * sum_x) / (float)n;
     
     // R² = 1 - SS_res / SS_tot
-    float y_mean = sum_y / (float)n;
+    // For centered data, SS_tot ≈ Σ(y_i)² directly (mean ≈ 0)
     float ss_tot = 0, ss_res = 0;
     
     for (int i = 0; i < n; i++) {
         float y_pred = a * x[i] + b;
         ss_res += (y[i] - y_pred) * (y[i] - y_pred);
-        ss_tot += (y[i] - y_mean) * (y[i] - y_mean);
+        ss_tot += y[i] * y[i];
     }
     
     if (ss_tot < 1e-12f) return 1.0f;
@@ -76,16 +78,15 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     unsigned long t_start = millis();
     digitalWrite(MOSFET_PIN, HIGH); // MOSFET OFF → load disconnected
     
-    // Small delay for the first "instantaneous" reading
-    delay(POST_PULSE_DELAY_MS);
-    
-    // First reading: the "instant after" voltage (for R_ohm calculation)
+    // NO delay here — ADS1115 at 860 SPS integrates over ~1.16 ms,
+    // which naturally filters inductive ringing from MOSFET switching.
+    // Any software delay would let chemical relaxation start, corrupting R_ohm.
     result.V_after = adc.readVoltage();
     
     // Collect relaxation samples
     unsigned long elapsed;
     for (int i = 0; i < RELAX_SAMPLES; i++) {
-        unsigned long target = (unsigned long)((i + 1) * RELAX_SAMPLE_STEP_MS) + POST_PULSE_DELAY_MS;
+        unsigned long target = (unsigned long)((i + 1) * RELAX_SAMPLE_STEP_MS);
         while ((elapsed = millis() - t_start) < target) {
             // busy-wait for precise timing
         }
@@ -98,11 +99,6 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     // --- Phase 3: Calculate parameters ---
     
     // R_ohm: ohmic resistance from instantaneous voltage jump
-    // When load is removed, voltage jumps by I * R_ohm
-    // V_before = V_emf - I * R_ohm  (under load)
-    // V_after  = V_emf - I * R_ohm + I * R_ohm = V_emf (instant after)
-    // Actually: V_before is under load, V_after is just after disconnect
-    // The jump is: ΔV = V_after - V_before = I * R_ohm
     float delta_v = result.V_after - result.V_before;
     if (result.I_load > 0.001f) {
         result.R_ohm = delta_v / result.I_load;
@@ -111,7 +107,6 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     }
     
     // R_pol: polarization resistance from total relaxation depth
-    // Total relaxation = V_final - V_after
     result.V_relaxation = result.V_final - result.V_after;
     if (result.I_load > 0.001f) {
         result.R_pol = result.V_relaxation / result.I_load;
@@ -119,9 +114,16 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
         result.R_pol = 0.0f;
     }
     
-    // R²: logarithmic fit of relaxation curve
+    // R²: logarithmic fit of CENTERED relaxation curve
+    // Center data: delta_v[i] = voltage_[i] - voltage_[0]
+    // This prevents catastrophic cancellation in float arithmetic
+    float centered_v[RELAX_SAMPLES];
+    for (int i = 0; i < RELAX_SAMPLES; i++) {
+        centered_v[i] = voltage_[i] - voltage_[0];
+    }
+    
     float a_coeff, b_coeff;
-    result.R_squared = calculateR2(log_time_, voltage_, RELAX_SAMPLES, a_coeff, b_coeff);
+    result.R_squared = calculateR2Centered(LOG_TIME, centered_v, RELAX_SAMPLES, a_coeff, b_coeff);
     
     // SOH grade based on R²
     if (result.R_squared > SOH_EXCELLENT) {
