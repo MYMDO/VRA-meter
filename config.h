@@ -8,8 +8,8 @@
 // --- ADS1115 Configuration ---
 // Channel 0 (A0-A1): Differential current measurement across shunt
 // Channel 1 (A2-A3): Differential voltage measurement across battery (Kelvin)
-#define ADS1115_CH_CURRENT  0     // Config register mux bits for A0-A1
-#define ADS1115_CH_VOLTAGE  1     // Config register mux bits for A2-A3
+#define ADS1115_CH_CURRENT  0     // Mux channel index for A0-A1
+#define ADS1115_CH_VOLTAGE  1     // Mux channel index for A2-A3
 
 // PGA gain settings (bits [11:9] in config register)
 #define PGA_6144V   0x0000
@@ -40,6 +40,8 @@
 #define RELAX_SAMPLES        30    // Number of voltage samples during relaxation
 #define RELAX_SAMPLE_STEP_MS 10    // Interval between relaxation samples (ms)
 #define PRE_PULSE_SETTLE_MS  50    // Wait before pulse for ADC settling
+#define V_AFTER_SETTLE_MS    3     // Wait for first conversion after MOSFET off (ms)
+#define ADC_START_LEAD_MS    2     // Start conversion this many ms before target (ms)
 
 // --- Battery Thresholds ---
 #define BATTERY_MIN_V   2.5f   // Minimum voltage to allow test (V)
@@ -50,5 +52,13 @@
 #define SOH_EXCELLENT   0.999f // R² > 0.999 → Excellent
 #define SOH_GOOD        0.95f  // R² > 0.95  → Good
 // R² < 0.95 → Poor / damaged
+
+// --- Safety ---
+#define SAFETY_TIMEOUT_MS  2000  // Hard kill-switch for MOSFET (ms)
+#define MIN_RELAX_MV       4.0f  // Minimum relaxation amplitude for valid R² (mV)
+                                // Below this, signal is below ADS1115 LSB → auto EXCELLENT
+
+// --- I2C Timing ---
+#define I2C_NOP_COUNT  4  // NOPs per half-period (~250ns at 16MHz → ~200kHz)
 
 #endif

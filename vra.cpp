@@ -3,8 +3,6 @@
 #include "config.h"
 #include <math.h>
 
-extern ADS1115 adc;
-
 // Pre-computed ln(t) for t = 10, 20, 30, ... 300 ms
 // Avoids expensive runtime log() on ATmega328P (no FPU)
 const float LOG_TIME[RELAX_SAMPLES] PROGMEM = {
@@ -16,8 +14,16 @@ const float LOG_TIME[RELAX_SAMPLES] PROGMEM = {
     5.560682, 5.598422, 5.634790, 5.669881, 5.703782
 };
 
-void VRA_Analyzer::begin() {
-    // No runtime init needed — LOG_TIME is compile-time constant
+void VRA_Analyzer::begin(ADS1115 &adc) {
+    adc_ = &adc;
+}
+
+void VRA_Analyzer::setLoad(bool on) {
+    digitalWrite(MOSFET_PIN, on ? LOW : HIGH);
+}
+
+void VRA_Analyzer::killLoad() {
+    digitalWrite(MOSFET_PIN, HIGH);  // active-low: HIGH = OFF
 }
 
 // R² on centered data: works with delta_v[i] = V[i] - V[0]
@@ -25,104 +31,102 @@ void VRA_Analyzer::begin() {
 // Original formula S_yy = Σy² - (Σy)²/n would lose all precision on raw ~3.85V values
 float VRA_Analyzer::calculateR2Centered(const float *x, const float *y, int n, float &a, float &b) {
     if (n < 2) return 0.0f;
-    
+
     float sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
-    
+
     for (int i = 0; i < n; i++) {
         sum_x  += x[i];
         sum_y  += y[i];
         sum_xy += x[i] * y[i];
         sum_x2 += x[i] * x[i];
     }
-    
+
     float denom = (float)n * sum_x2 - sum_x * sum_x;
     if (fabs(denom) < 1e-12f) {
         a = 0;
         b = 0;
         return 0.0f;
     }
-    
+
     a = ((float)n * sum_xy - sum_x * sum_y) / denom;
     b = (sum_y - a * sum_x) / (float)n;
-    
+
     // R² = 1 - SS_res / SS_tot
     // For centered data, SS_tot ≈ Σ(y_i)² directly (mean ≈ 0)
     float ss_tot = 0, ss_res = 0;
-    
+
     for (int i = 0; i < n; i++) {
         float y_pred = a * x[i] + b;
         ss_res += (y[i] - y_pred) * (y[i] - y_pred);
         ss_tot += y[i] * y[i];
     }
-    
+
     if (ss_tot < 1e-12f) return 1.0f;
-    
+
     return 1.0f - (ss_res / ss_tot);
 }
 
 bool VRA_Analyzer::measure(VRA_Result &result) {
     // Safety: check battery voltage first
-    float v_check = adc.readVoltage();
+    float v_check = adc_->readVoltage();
     if (v_check < BATTERY_MIN_V || v_check > BATTERY_MAX_V) {
         return false;
     }
-    
-    // Safety timeout — if anything hangs, kill MOSFET within 2 seconds
+
+    // Safety timeout — if anything hangs, kill MOSFET within SAFETY_TIMEOUT_MS
     // Normal measurement takes ~350ms (50ms settle + 3ms V_after + 300ms relaxation)
     unsigned long safety_start = millis();
-    #define SAFETY_TIMEOUT_MS 2000
-    
+
     // --- Phase 1: Measure steady-state voltage under load ---
-    digitalWrite(MOSFET_PIN, LOW);  // MOSFET ON → load connected
-    delay(PRE_PULSE_SETTLE_MS);     // Let voltage settle under load
-    
-    result.V_before = adc.readVoltage();
-    result.I_load   = adc.readCurrent();
-    
+    setLoad(true);                                  // MOSFET ON → load connected
+    delay(PRE_PULSE_SETTLE_MS);                     // Let voltage settle under load
+
+    result.V_before = adc_->readVoltage();
+    result.I_load   = adc_->readCurrent();
+
     // --- Phase 2: Turn off load, capture relaxation curve ---
     unsigned long t_start = millis();
-    digitalWrite(MOSFET_PIN, HIGH); // MOSFET OFF → load disconnected
-    
+    setLoad(false);                                 // MOSFET OFF → load disconnected
+
     // Start first conversion immediately — ADS1115 integrates ~1.16ms,
     // naturally filtering inductive ringing from MOSFET switching.
-    adc.startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
-    delay(3); // Wait for conversion to complete
-    result.V_after = adc.readResult(FS_6144V);
-    
+    adc_->startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
+    delay(V_AFTER_SETTLE_MS);                       // Wait for conversion to complete
+    result.V_after = adc_->readResult(FS_6144V);
+
     // Collect relaxation samples with precise timing
-    // Strategy: start conversion ~2ms before target, read at target time
+    // Strategy: start conversion ADC_START_LEAD_MS before target, read at target time
     // This ensures the ADS1115 integration window is centered on the target
     for (int i = 0; i < RELAX_SAMPLES; i++) {
         unsigned long target = (unsigned long)((i + 1) * RELAX_SAMPLE_STEP_MS);
-        
+
         // Start conversion early — I2C write takes ~1ms, integration takes ~1.16ms
-        // Total: ~2.2ms, so start at target - 2ms
-        unsigned long start_at = (target > 2) ? target - 2 : 0;
+        unsigned long start_at = (target > ADC_START_LEAD_MS) ? target - ADC_START_LEAD_MS : 0;
         while ((millis() - t_start) < start_at) {
             if (millis() - safety_start > SAFETY_TIMEOUT_MS) {
-                digitalWrite(MOSFET_PIN, HIGH); // FAILSAFE: kill load
+                killLoad();                         // FAILSAFE: kill load
                 return false;
             }
         }
-        adc.startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
-        
+        adc_->startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
+
         // Wait until target time for read
         while ((millis() - t_start) < target) {
             if (millis() - safety_start > SAFETY_TIMEOUT_MS) {
-                digitalWrite(MOSFET_PIN, HIGH); // FAILSAFE: kill load
+                killLoad();                         // FAILSAFE: kill load
                 return false;
             }
         }
-        
+
         // Read the completed result (fast I2C read, ~1ms)
-        voltage_[i] = adc.readResult(FS_6144V);
+        voltage_[i] = adc_->readResult(FS_6144V);
     }
-    
+
     // Final relaxed voltage (last sample)
     result.V_final = voltage_[RELAX_SAMPLES - 1];
-    
+
     // --- Phase 3: Calculate parameters ---
-    
+
     // R_ohm: ohmic resistance from instantaneous voltage jump
     float delta_v = result.V_after - result.V_before;
     if (result.I_load > 0.001f) {
@@ -130,7 +134,7 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     } else {
         result.R_ohm = 0.0f;
     }
-    
+
     // R_pol: polarization resistance from total relaxation depth
     result.V_relaxation = result.V_final - result.V_after;
     if (result.I_load > 0.001f) {
@@ -138,7 +142,7 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     } else {
         result.R_pol = 0.0f;
     }
-    
+
     // R²: logarithmic fit of CENTERED relaxation curve
     // Center data: delta_v[i] = voltage_[i] - voltage_[0]
     // This prevents catastrophic cancellation in float arithmetic
@@ -146,12 +150,11 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     for (int i = 0; i < RELAX_SAMPLES; i++) {
         centered_v[i] = voltage_[i] - voltage_[0];
     }
-    
+
     // QUANTIZATION GUARD: If relaxation amplitude is too small,
     // the signal is below ADC resolution → R² is meaningless.
-    // At PGA_6144V, 1 LSB = 187.5µV. If ΔV_pol < 4mV (~21 LSB),
+    // At PGA_6144V, 1 LSB = 187.5µV. If ΔV_pol < MIN_RELAX_MV,
     // the battery is physically excellent — skip regression.
-    #define MIN_RELAX_MV  4.0f  // minimum relaxation amplitude for valid R²
     float abs_relax = fabs(result.V_relaxation);
     if (abs_relax < (MIN_RELAX_MV / 1000.0f)) {
         result.R_squared = 1.0f;  // too small to measure → perfect
@@ -159,7 +162,7 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     } else {
         float a_coeff, b_coeff;
         result.R_squared = calculateR2Centered(LOG_TIME, centered_v, RELAX_SAMPLES, a_coeff, b_coeff);
-        
+
         // SOH grade based on R²
         if (result.R_squared > SOH_EXCELLENT) {
             result.soh_grade = 2; // Excellent
@@ -169,7 +172,7 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
             result.soh_grade = 0; // Poor
         }
     }
-    
+
     return true;
 }
 
