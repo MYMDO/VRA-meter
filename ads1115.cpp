@@ -17,12 +17,12 @@
 // I2C_NOP_COUNT NOPs ≈ 250ns per half-period → ~200kHz clock
 #define I2C_NOP() __asm__ __volatile__("nop\n\tnop\n\tnop\n\tnop")
 
+// sdaHigh() and sdaInput() are identical: set DDR bit to 0 (input mode)
+// Input mode lets the external pull-up pull SDA/SCL HIGH (open-drain I2C)
 void ADS1115::sdaHigh() { SDA_DDR &= ~(1 << SDA_BIT); }
 void ADS1115::sdaLow()  { SDA_DDR |= (1 << SDA_BIT); SDA_PORT &= ~(1 << SDA_BIT); }
-void ADS1115::sdaInput(){ SDA_DDR &= ~(1 << SDA_BIT); }
 void ADS1115::sclHigh() { SCL_DDR &= ~(1 << SCL_BIT); }
 void ADS1115::sclLow()  { SCL_DDR |= (1 << SCL_BIT); SCL_PORT &= ~(1 << SCL_BIT); }
-void ADS1115::sclInput(){ SCL_DDR &= ~(1 << SCL_BIT); }
 bool ADS1115::sdaRead() { return SDA_PINR & (1 << SDA_BIT); }
 
 void ADS1115::begin() {
@@ -60,18 +60,17 @@ void ADS1115::i2cWriteByte(uint8_t data) {
         I2C_NOP();
     }
     // ACK
-    sdaInput();
+    sdaHigh(); // release SDA for ACK (input mode)
     I2C_NOP();
     sclHigh();
     I2C_NOP();
     sclLow();
     I2C_NOP();
-    sdaHigh(); // release
 }
 
 uint8_t ADS1115::i2cReadByte(bool ack) {
     uint8_t data = 0;
-    sdaInput();
+    sdaHigh(); // release SDA for reading (input mode)
     for (int i = 7; i >= 0; i--) {
         sclHigh();
         I2C_NOP();
@@ -117,7 +116,7 @@ uint16_t ADS1115::readRegister(uint8_t reg) {
 
 float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
     startConversion(channel, pga);
-    delay(2); // 860 SPS → 1.16ms, give 0.84ms margin
+    delay(ADC_START_LEAD_MS);  // 860 SPS → 1.16ms, give margin
     // Poll for completion
     uint16_t attempts = 0;
     while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {

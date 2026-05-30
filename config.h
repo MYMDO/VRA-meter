@@ -1,16 +1,13 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#define VERSION "1.0"
+
 // --- Hardware Pin Assignments ---
 #define MOSFET_PIN       7        // Digital output: LOW = load ON, HIGH = load OFF
 #define ADS1115_ADDR     0x48     // I2C address (ADDR pin to GND)
 
 // --- ADS1115 Configuration ---
-// Channel 0 (A0-A1): Differential current measurement across shunt
-// Channel 1 (A2-A3): Differential voltage measurement across battery (Kelvin)
-#define ADS1115_CH_CURRENT  0     // Mux channel index for A0-A1
-#define ADS1115_CH_VOLTAGE  1     // Mux channel index for A2-A3
-
 // PGA gain settings (bits [11:9] in config register)
 #define PGA_6144V   0x0000
 #define PGA_4096V   0x0200

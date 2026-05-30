@@ -1,4 +1,3 @@
-#include <Arduino.h>
 #include "config.h"
 #include "ads1115.h"
 #include "vra.h"
@@ -16,7 +15,7 @@ void printSeparator() {
 void printBanner() {
     Serial.println();
     printSeparator();
-    Serial.println(F("  VRA Meter v1.0"));
+    Serial.println(F("  VRA Meter v" VERSION));
     Serial.println(F("  Voltage Relaxation Analysis"));
     Serial.println(F("  Single-pulse battery diagnostics"));
     printSeparator();
