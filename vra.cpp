@@ -195,11 +195,11 @@ float VRA_Analyzer::getVoltageSample(uint8_t index) const {
 }
 
 void VRA_Analyzer::getAssessment(const VRA_Result &result, char *buf, uint8_t bufsize) {
-    if (result.R_squared > 0.999f) {
+    if (result.R_squared > SOH_EXCELLENT) {
         snprintf(buf, bufsize, "Battery in perfect condition. No degradation detected.");
-    } else if (result.R_squared > 0.99f) {
+    } else if (result.R_squared > SOH_GOOD) {
         snprintf(buf, bufsize, "Minor contact oxidation or slight SEI growth.");
-    } else if (result.R_squared > 0.95f) {
+    } else if (result.R_squared > 0.75f) {
         snprintf(buf, bufsize, "Moderate aging. Active material degradation.");
     } else {
         snprintf(buf, bufsize, "WARNING: Internal damage suspected (micro-short or electrode failure).");

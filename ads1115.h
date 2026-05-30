@@ -18,6 +18,10 @@
 #define MUX_A0_A1  0x0000  // Differential A0 vs A1
 #define MUX_A2_A3  0x3000  // Differential A2 vs A3
 
+// Channel assignments (hardware-specific, not user-tunable)
+#define ADS1115_CH_CURRENT  0   // A0-A1: differential current across shunt
+#define ADS1115_CH_VOLTAGE  1   // A2-A3: differential voltage across battery (Kelvin)
+
 class ADS1115 {
 public:
     void begin();
@@ -46,10 +50,8 @@ private:
     // ATmega328P: A4 = SDA = PC4, A5 = SCL = PC5
     inline void sdaHigh();
     inline void sdaLow();
-    inline void sdaInput();
     inline void sclHigh();
     inline void sclLow();
-    inline void sclInput();
     inline bool sdaRead();
 };
 
