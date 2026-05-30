@@ -16,6 +16,9 @@ A minimalist hardware, maximum intelligence software approach to measuring batte
   - [Schematic](#schematic)
   - [Kelvin Connection](#kelvin-connection)
 - [Software Architecture](#software-architecture)
+  - [Layer Diagram](#layer-diagram)
+  - [Measurement Phases](#measurement-phases)
+  - [Key Design Decisions](#key-design-decisions)
 - [Installation](#installation)
 - [Usage](#usage)
   - [Serial Monitor Output](#serial-monitor-output)
@@ -98,6 +101,8 @@ The entire measurement takes under 400ms and requires no user expertise — the 
 
 > **CRITICAL:** The 10kΩ pull-up resistor on the MOSFET gate to 5V is mandatory. During Arduino boot (first ~50ms), all pins are high-impedance INPUT. With active-low MOSFET logic (LOW=ON, HIGH=OFF), the gate must be pulled HIGH to keep the load OFF. A pull-down to GND would turn the load ON during boot — dangerous.
 
+> **PLATFORM WARNING:** Pull-ups to 5V (SDA/SCL) are ONLY safe for 5V boards (Uno, Nano ATmega328P). For 3.3V boards (Due, Nano 33 BLE/IoT, Zero, RP2040), use pull-ups to 3.3V — NOT 5V.
+
 ### Schematic
 
 ```
@@ -165,26 +170,46 @@ For accurate voltage measurement, use **4-wire Kelvin sensing**:
 
 ## Software Architecture
 
+### Layer Diagram
+
 ```
 VRA-meter/
-├── VRA-meter.ino        Entry point, serial UI, measurement trigger
+├── VRA-meter.ino        UI layer: serial commands, print results, trigger measurement
 ├── config.h             User-tunable parameters (pins, timing, thresholds)
-├── ads1115.h/.cpp       Bit-banged I2C driver (direct port, ~200kHz) for ADS1115
-└── vra.h/.cpp           VRA analysis: R², logarithmic regression, SOH grading
+├── ads1115.h/.cpp       Driver layer: bit-banged I2C, register read/write, conversion control
+└── vra.h/.cpp           Analysis layer: measurement phases, R² regression, SOH grading
 ```
+
+**Dependency flow:** `.ino` → `vra.h` → `ads1115.h` → `config.h`
+
+The `.ino` file should never access ADS1115 registers directly. All ADC operations go through `VRA_Analyzer` methods or `ADS1115` public API (`readDifferential`, `startConversion`, `readResult`).
+
+### Measurement Phases
+
+`VRA_Analyzer::measure()` orchestrates four distinct phases:
+
+| Phase | Method | What It Does |
+|-------|--------|-------------|
+| 0 | `checkBattery()` | Read battery voltage, check I2C bus, validate safe range |
+| 1 | `acquireData()` | Apply load pulse, capture V_instant, collect 30 relaxation samples |
+| 2 | `calculateParams()` | Compute R_ohm and R_pol from voltage deltas and current |
+| 3 | `gradeResult()` | Run logarithmic regression on centered data, assign SOH grade |
 
 ### Key Design Decisions
 
+- **3-layer architecture** — `.ino` (UI) → `vra.cpp` (analysis) → `ads1115.cpp` (driver). Clean separation of concerns; each layer is independently testable
 - **Direct-port bit-banged I2C** — ATmega328P PORTC manipulation (`sdaHigh()`, `sclLow()`) achieves ~200kHz clock, vs ~20kHz with `digitalWrite`. No Wire library, no interrupt conflicts
 - **Single-shot mode** (860 SPS) — one conversion per read, no continuous streaming overhead
 - **No external libraries** — pure Arduino core, zero `#include` beyond `<Arduino.h>` and `<math.h>`
-- **All tunable parameters in one file** — every user-adjustable value lives in `config.h`
+- **Type-safe enums** — `VRA_Error` and `SOH_Grade` are strongly-typed enums (`enum : uint8_t`), not bare `#define` constants
 - **PROGMEM log table** — pre-computed `ln(10)..ln(300)` in flash, avoiding 30 expensive `log()` calls on the FPU-less ATmega328P
 - **Centered regression** — voltage data is centered (`ΔV = V[i] - V[0]`) before R² calculation to prevent catastrophic cancellation in 32-bit float
 - **PGA ±6.144V for voltage channel** — 4.2V Li-ion full charge saturates ±4.096V range; ±6.144V gives 187.5µV/LSB which is sufficient for 10-150mV relaxation signals
 - **Quantization guard** — if relaxation amplitude < 4mV (~21 LSB at 187.5µV/LSB), R² regression is skipped and battery is auto-marked EXCELLENT (signal too small to measure meaningfully)
 - **Zero-delay V_instant** — no software delay after MOSFET off; the ADS1115's 1.16ms integration window naturally filters inductive ringing
 - **Start-before-wait ADC timing** — conversion starts ~2ms before target read time, runs in parallel with the busy-wait, ensuring samples are precisely aligned to the 10ms grid
+- **ADC saturation detection** — raw ADC code is checked against `ADC_SATURATION_THRESHOLD` (32700) before computing current; saturated readings produce `VRA_ERR_ADC_SATURATED` instead of wrong resistance values
+- **I2C NACK detection** — every I2C write checks the ACK bit; NACK sets `last_i2c_error_` flag, propagated as `VRA_ERR_I2C_FAULT`
 - **Safety timeout** — 2-second hard limit in `measure()`, kills MOSFET on any I2C hang
 - **Pull-up (not pull-down) on MOSFET gate** — active-low logic (LOW=ON, HIGH=OFF) requires pull-UP to 5V; pull-down would turn load ON during Arduino boot (~50ms high-Z period)
 
@@ -378,7 +403,7 @@ A perfect fit gives R² = 1.0. Deviations indicate structural problems inside th
 
 ## Configuration
 
-All tunable parameters are in `config.h`:
+All user-tunable parameters are in `config.h`. Hardware-level constants (PGA gains, full-scale voltages, channel assignments, saturation threshold) are in `ads1115.h`.
 
 ### Hardware
 
@@ -430,8 +455,10 @@ The load resistor determines the discharge current. For a 3.7V Li-ion cell:
 |---------|-------------|----------|
 | `UNDERVOLTAGE` message | Battery below 2.5V or not connected | Check wiring, charge battery |
 | `OVERVOLTAGE` message | Battery above 4.3V | Disconnect immediately, check cell |
+| `ADC SATURATED` error | Current exceeds 2.5A (shunt + PGA limit) | Use larger load resistor or lower-value shunt |
+| `I2C bus fault` error | Wiring error, missing pull-ups, wrong address | Check SDA/SCL wiring, add 4.7kΩ pull-ups, verify ADDR pin |
+| `Voltage left safe range` | Battery voltage drifted during measurement | Check battery connection, try fresh cell |
 | R_ohm = 0 mΩ | Current too low to measure | Use smaller load resistor |
-| R_ohm too low / R_pol too high | Software delay before V_instant | Verify no delay between MOSFET off and first ADC read (fixed in firmware) |
 | R² very low (< 0.9) | Battery damaged or wrong timing | Check MOSFET switching, verify cell |
 | Erratic readings | I2C noise, loose connections | Shorten wires, add 100nF cap on ADS1115 VDD |
 | ADS1115 not responding | Wrong I2C address or wiring | Verify SDA/SCL connections, check ADDR pin |
