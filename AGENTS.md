@@ -88,6 +88,7 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 - Adding delay between MOSFET off and V_instant read
 - Computing R² on raw voltage instead of centered ΔV
 - Using runtime `log()` instead of PROGMEM `LOG_TIME` array
+- Reading `LOG_TIME[i]` directly — use `pgm_read_float(&LOG_TIME[i])` (PROGMEM, not RAM)
 - Using `digitalWrite()` for I2C — use direct port manipulation (see ads1115.cpp)
 - Calling `adc_->readVoltage()` in relaxation loop — use startConversion/readResult pattern
 - Using raw `digitalWrite(MOSFET_PIN, ...)` — use setLoad()/killLoad() helpers
