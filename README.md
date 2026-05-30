@@ -168,11 +168,9 @@ For accurate voltage measurement, use **4-wire Kelvin sensing**:
 ```
 VRA-meter/
 ├── VRA-meter.ino        Main sketch — setup, loop, serial UI
-├── config.h            Hardware pin assignments & all tunable parameters
-├── ads1115.h           ADS1115 driver header
-├── ads1115.cpp         Bit-banged I2C driver for ADS1115 (zero dependencies)
-├── vra.h               VRA analyzer header
-└── vra.cpp             R² calculation, logarithmic regression, SOH grading
+├── config.h            All tunable parameters (pins, timing, thresholds)
+├── ads1115.h/.cpp      Bit-banged I2C driver for ADS1115 (direct port, ~200kHz)
+└── vra.h/.cpp          VRA analysis: R², logarithmic regression, SOH grading
 ```
 
 ### Key Design Decisions
@@ -180,7 +178,7 @@ VRA-meter/
 - **Direct-port bit-banged I2C** — ATmega328P PORTC manipulation (`sdaHigh()`, `sclLow()`) achieves ~200kHz clock, vs ~20kHz with `digitalWrite`. No Wire library, no interrupt conflicts
 - **Single-shot mode** (860 SPS) — one conversion per read, no continuous streaming overhead
 - **No external libraries** — pure Arduino core, zero `#include` beyond `<Arduino.h>` and `<math.h>`
-- **All config in one file** — every tunable parameter lives in `config.h`
+- **All tunable parameters in one file** — every user-adjustable value lives in `config.h`
 - **PROGMEM log table** — pre-computed `ln(10)..ln(300)` in flash, avoiding 30 expensive `log()` calls on the FPU-less ATmega328P
 - **Centered regression** — voltage data is centered (`ΔV = V[i] - V[0]`) before R² calculation to prevent catastrophic cancellation in 32-bit float
 - **PGA ±6.144V for voltage channel** — 4.2V Li-ion full charge saturates ±4.096V range; ±6.144V gives 187.5µV/LSB which is sufficient for 10-150mV relaxation signals
@@ -380,12 +378,13 @@ A perfect fit gives R² = 1.0. Deviations indicate structural problems inside th
 
 ## Configuration
 
-All parameters are in `config.h`:
+All tunable parameters are in `config.h`:
 
 ### Hardware
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `VERSION` | `"1.0"` | Firmware version (displayed in banner) |
 | `MOSFET_PIN` | `7` | Digital output for load switch |
 | `ADS1115_ADDR` | `0x48` | I2C address (change if ADDR pin is HIGH) |
 | `SHUNT_RESISTANCE` | `0.1` Ω | Current sense resistor value |
@@ -399,6 +398,8 @@ All parameters are in `config.h`:
 | `RELAX_SAMPLES` | `30` | Number of voltage samples during relaxation |
 | `RELAX_SAMPLE_STEP_MS` | `10` ms | Time between relaxation samples |
 | `PRE_PULSE_SETTLE_MS` | `50` ms | Settling time before first reading |
+| `V_AFTER_SETTLE_MS` | `3` ms | Wait for first conversion after MOSFET off |
+| `ADC_START_LEAD_MS` | `2` ms | Start conversion before target time (start-before-wait) |
 
 ### Safety Thresholds
 
@@ -407,6 +408,8 @@ All parameters are in `config.h`:
 | `BATTERY_MIN_V` | `2.5` V | Minimum allowed voltage |
 | `BATTERY_MAX_V` | `4.3` V | Maximum allowed voltage (overvoltage protection) |
 | `MAX_CURRENT_A` | `5.0` A | Maximum allowed current |
+| `SAFETY_TIMEOUT_MS` | `2000` ms | Hard kill-switch for MOSFET (I2C hang protection) |
+| `MIN_RELAX_MV` | `4.0` mV | Minimum relaxation amplitude for valid R² (quantization guard) |
 
 ### Choosing Load Resistor
 
