@@ -27,6 +27,28 @@ config.h        →  User-tunable parameters only (pins, timing, thresholds)
 
 **Key rule:** The `.ino` file should never access ADS1115 registers directly. All ADC operations go through `VRA_Analyzer` methods or `ADS1115` public API (`readDifferential`, `startConversion`, `readResult`).
 
+## Measurement phases
+
+`measure()` in `vra.cpp` orchestrates four phases:
+
+1. `checkBattery()` — read voltage, check I2C, validate safe range
+2. `acquireData()` — load pulse, V_instant, 30 relaxation samples
+3. `calculateParams()` — R_ohm and R_pol from voltage deltas
+4. `gradeResult()` — R² regression on centered data, SOH grade
+
+Each phase is a separate method. Do NOT inline them back into `measure()`.
+
+## Type-safe enums (cross-file convention)
+
+`vra.h` defines two strongly-typed enums. Use them everywhere — never bare `uint8_t` or `#define` for these concepts:
+
+```cpp
+enum VRA_Error : uint8_t { VRA_ERR_NONE, VRA_ERR_VOLTAGE_RANGE, VRA_ERR_ADC_SATURATED, VRA_ERR_I2C_FAULT };
+enum SOH_Grade : uint8_t { SOH_POOR, SOH_GOOD, SOH_EXCELLENT };
+```
+
+Threshold macros in `config.h` use `_THRESH` suffix (`SOH_EXCELLENT_THRESHOLD`) to avoid name collision with enum members.
+
 ## Key cross-file dependency
 
 `VRA_Analyzer::begin(ADS1115 &adc)` in `vra.cpp` takes an ADC reference. The global `ads` object is declared in the `.ino` file and passed at startup. If you move or rename the `ADS1115 ads;` declaration, update the `vra.begin(ads)` call in `.ino`.
