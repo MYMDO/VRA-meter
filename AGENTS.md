@@ -14,15 +14,15 @@ Or open `VRA-meter.ino` in Arduino IDE, select board, upload. The `.ino` filenam
 
 ## Zero external dependencies
 
-All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C is bit-banged (not Wire library) — uses direct port manipulation on ATmega328P (PORTC, A4/A5) in `ads1115.cpp:11-26`.
+All code uses only `<Arduino.h>` and `<math.h>`. Do not add library imports. I2C is bit-banged (not Wire library) — uses direct port manipulation on ATmega328P (PORTC, A4/A5) in `ads1115.cpp`.
 
 ## Key cross-file dependency
 
-`VRA_Analyzer::begin(ADS1115 &adc)` in `vra.cpp:22` takes an ADC reference. The global `adc` object is declared in the `.ino` file and passed at startup. If you move or rename the `ADS1115 adc;` declaration, update the `vra.begin(adc)` call in `.ino`.
+`VRA_Analyzer::begin(ADS1115 &adc)` in `vra.cpp:17` takes an ADC reference. The global `adc` object is declared in the `.ino` file and passed at startup. If you move or rename the `ADS1115 adc;` declaration, update the `vra.begin(adc)` call in `.ino`.
 
 ## MOSFET logic is active-low
 
-`D7 LOW` = load ON, `D7 HIGH` = load OFF. Confusing if you expect standard logic. See `config.h:5`.
+`D7 LOW` = load ON, `D7 HIGH` = load OFF. Confusing if you expect standard logic. See `config.h`.
 
 MOSFET is controlled via `VRA_Analyzer::setLoad()` and `killLoad()` helpers in `vra.cpp`. Do NOT use raw `digitalWrite(MOSFET_PIN, ...)` outside these helpers.
 
@@ -32,9 +32,10 @@ A **10kΩ resistor from gate to 5V is mandatory**. During Arduino boot, all pins
 
 ## Config lives in config.h
 
-Every tunable parameter (pins, PGA gains, timing, thresholds, safety limits) is in `config.h`. Do not hardcode values in `.cpp` files.
+Every tunable parameter (pins, PGA gains, timing, thresholds, safety limits) is in `config.h`. Do not hardcode values in `.cpp` files. Channel assignments (`ADS1115_CH_CURRENT`/`CH_VOLTAGE`) are in `ads1115.h` — they are driver-specific, not user-tunable.
 
 Key constants:
+- `VERSION` ("1.0") — firmware version for banner and future EEPROM storage
 - `SAFETY_TIMEOUT_MS` (2000) — MOSFET kill-switch timeout
 - `MIN_RELAX_MV` (4.0) — minimum relaxation amplitude for valid R²
 - `V_AFTER_SETTLE_MS` (3) — wait for first conversion after MOSFET off
@@ -42,7 +43,7 @@ Key constants:
 
 ## PROGMEM log table
 
-`vra.h:12` exports `LOG_TIME[30]` — pre-computed `ln(10)..ln(300)` stored in flash via `PROGMEM`. Read with `pgm_read_float(&LOG_TIME[i])`. Do not replace with runtime `log()` calls — ATmega328P has no FPU, each `log()` costs ~500µs.
+`vra.h:11` exports `LOG_TIME[30]` — pre-computed `ln(10)..ln(300)` stored in flash via `PROGMEM`. Read with `pgm_read_float(&LOG_TIME[i])`. Do not replace with runtime `log()` calls — ATmega328P has no FPU, each `log()` costs ~500µs.
 
 ## Centered regression (float precision fix)
 
@@ -50,15 +51,15 @@ R² is computed on **centered** voltage data: `ΔV[i] = V[i] - V[0]`. This preve
 
 ## V_instant: no delay after MOSFET off
 
-`vra.cpp:84` reads V_instant immediately after `setLoad(false)`. Do NOT add a delay here. The ADS1115 at 860 SPS integrates over ~1.16ms, naturally filtering inductive ringing. Any delay lets chemical relaxation start, corrupting R_ohm.
+`vra.cpp` reads V_instant immediately after `setLoad(false)`. Do NOT add a delay here. The ADS1115 at 860 SPS integrates over ~1.16ms, naturally filtering inductive ringing. Any delay lets chemical relaxation start, corrupting R_ohm.
 
 ## I2C: direct port manipulation (not digitalWrite)
 
-`ads1115.cpp` uses direct PORTC manipulation for I2C — `sdaHigh()`, `sclLow()`, etc. (lines 11-26). This achieves ~200kHz clock vs ~20kHz with `digitalWrite`. Do NOT replace with `digitalWrite()` — it's 10x slower and will break the 10ms sample timing.
+`ads1115.cpp` uses direct PORTC manipulation for I2C — `sdaHigh()`, `sclLow()`, etc. This achieves ~200kHz clock vs ~20kHz with `digitalWrite`. Do NOT replace with `digitalWrite()` — it's 10x slower and will break the 10ms sample timing.
 
 ## ADC timing: start-before-wait pattern
 
-Relaxation samples use non-overlapping conversion: start conversion `ADC_START_LEAD_MS` before target time, then read at target. See `vra.cpp:95-115`. The sequence is:
+Relaxation samples use non-overlapping conversion: start conversion `ADC_START_LEAD_MS` before target time, then read at target. The sequence is:
 1. Wait until `target - ADC_START_LEAD_MS`
 2. Call `adc_->startConversion()` (I2C write + conversion starts)
 3. Wait until `target` (conversion completes in parallel)
@@ -75,7 +76,7 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 | File | Purpose |
 |------|---------|
 | `VRA-meter.ino` | Entry point, serial UI, measurement loop |
-| `config.h` | All hardware/tuning/safety constants |
+| `config.h` | All tunable parameters (pins, timing, thresholds) |
 | `ads1115.h/.cpp` | Bit-banged I2C driver (direct port, ~200kHz) for ADS1115 ADC |
 | `vra.h/.cpp` | VRA analysis: R², logarithmic regression, SOH grading |
 
@@ -84,7 +85,7 @@ Verification is manual: upload to board, open Serial Monitor at 115200 baud, con
 - Changing `SHUNT_RESISTANCE` in config.h without updating the physical resistor
 - Using Wire library instead of the bit-banged I2C in ads1115.cpp
 - Forgetting `F()` macro on string literals (AVR RAM is 2KB)
-- Moving MOSFET pin without updating both `config.h` and the pin init in `.ino:99-103`
+- Moving MOSFET pin without updating both `config.h` and the pin init in `.ino`
 - Adding delay between MOSFET off and V_instant read
 - Computing R² on raw voltage instead of centered ΔV
 - Using runtime `log()` instead of PROGMEM `LOG_TIME` array
