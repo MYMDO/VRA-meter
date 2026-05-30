@@ -47,7 +47,7 @@ void ADS1115::i2cStop() {
     I2C_NOP();
 }
 
-void ADS1115::i2cWriteByte(uint8_t data) {
+bool ADS1115::i2cWriteByte(uint8_t data) {
     for (int i = 7; i >= 0; i--) {
         if (data & (1 << i))
             sdaHigh();
@@ -59,13 +59,15 @@ void ADS1115::i2cWriteByte(uint8_t data) {
         sclLow();
         I2C_NOP();
     }
-    // ACK
+    // ACK — read SDA after 9th clock
     sdaHigh(); // release SDA for ACK (input mode)
     I2C_NOP();
     sclHigh();
     I2C_NOP();
+    bool ack = sdaRead();  // LOW = ACK, HIGH = NACK
     sclLow();
     I2C_NOP();
+    return ack;
 }
 
 uint8_t ADS1115::i2cReadByte(bool ack) {
@@ -95,19 +97,19 @@ uint8_t ADS1115::i2cReadByte(bool ack) {
 
 void ADS1115::writeRegister(uint8_t reg, uint16_t value) {
     i2cStart();
-    i2cWriteByte((ADS1115_ADDR << 1) | 0);
-    i2cWriteByte(reg);
-    i2cWriteByte((uint8_t)(value >> 8));
-    i2cWriteByte((uint8_t)(value & 0xFF));
+    if (!i2cWriteByte((ADS1115_ADDR << 1) | 0)) { last_i2c_error_ = true; i2cStop(); return; }
+    if (!i2cWriteByte(reg))                      { last_i2c_error_ = true; i2cStop(); return; }
+    if (!i2cWriteByte((uint8_t)(value >> 8)))    { last_i2c_error_ = true; i2cStop(); return; }
+    if (!i2cWriteByte((uint8_t)(value & 0xFF)))  { last_i2c_error_ = true; i2cStop(); return; }
     i2cStop();
 }
 
 uint16_t ADS1115::readRegister(uint8_t reg) {
     i2cStart();
-    i2cWriteByte((ADS1115_ADDR << 1) | 0);
-    i2cWriteByte(reg);
+    if (!i2cWriteByte((ADS1115_ADDR << 1) | 0)) { last_i2c_error_ = true; i2cStop(); return 0; }
+    if (!i2cWriteByte(reg))                      { last_i2c_error_ = true; i2cStop(); return 0; }
     i2cStart();
-    i2cWriteByte((ADS1115_ADDR << 1) | 1);
+    if (!i2cWriteByte((ADS1115_ADDR << 1) | 1)) { last_i2c_error_ = true; i2cStop(); return 0; }
     uint8_t msb = i2cReadByte(true);
     uint8_t lsb = i2cReadByte(false);
     i2cStop();
@@ -153,4 +155,19 @@ float ADS1115::readCurrent() {
 
 float ADS1115::readVoltage() {
     return readDifferential(ADS1115_CH_VOLTAGE, VOLTAGE_PGA, FS_6144V);
+}
+
+int16_t ADS1115::readCurrentRaw() {
+    startConversion(ADS1115_CH_CURRENT, CURRENT_PGA);
+    delay(ADC_START_LEAD_MS);
+    uint16_t attempts = 0;
+    while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {
+        delay(1);
+        if (++attempts > 100) break;
+    }
+    return (int16_t)readRegister(ADS1115_REG_CONVERSION);
+}
+
+uint16_t ADS1115::readConfigReg() {
+    return readRegister(ADS1115_REG_CONFIG);
 }

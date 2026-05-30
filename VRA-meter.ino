@@ -150,7 +150,20 @@ void loop() {
         measurement_count++;
         printResult(result, measurement_count);
     } else {
-        Serial.println(F("ERROR: Measurement failed (voltage out of range during test)."));
+        switch (result.error) {
+            case VRA_ERR_ADC_SATURATED:
+                Serial.println(F("ERROR: ADC SATURATED — current > 2.5A (reduce load or use lower shunt)"));
+                break;
+            case VRA_ERR_I2C_FAULT:
+                Serial.println(F("ERROR: I2C bus fault — check wiring, pull-ups, and ADS1115 address"));
+                break;
+            case VRA_ERR_VOLTAGE_RANGE:
+                Serial.println(F("ERROR: Voltage left safe range during test"));
+                break;
+            default:
+                Serial.println(F("ERROR: Measurement failed"));
+                break;
+        }
     }
 
     if (auto_mode) {

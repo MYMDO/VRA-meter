@@ -8,6 +8,11 @@
 #define ADS1115_ADDR     0x48     // I2C address (ADDR pin to GND)
 
 // --- ADS1115 Configuration ---
+/* PLATFORM WARNING:
+ * Pull-ups to 5V (SDA/SCL) are ONLY safe for 5V boards (Uno, Nano ATmega328P).
+ * For 3.3V boards (Due, Nano 33 BLE/IoT, Zero, RP2040):
+ *   → Use pull-ups to 3.3V, NOT 5V!
+ */
 // PGA gain settings (bits [11:9] in config register)
 #define PGA_6144V   0x0000
 #define PGA_4096V   0x0200
@@ -44,6 +49,7 @@
 #define BATTERY_MIN_V   2.5f   // Minimum voltage to allow test (V)
 #define BATTERY_MAX_V   4.3f   // Maximum voltage (overvoltage protection)
 #define MAX_CURRENT_A   2.5f   // Maximum allowed current (A) — limited by shunt (0.1Ω) and PGA ±256mV
+#define ADC_SATURATION_THRESHOLD  32700  // raw ADC code near full-scale → saturated
 
 // --- SOH Thresholds ---
 #define SOH_EXCELLENT   0.999f // R² > 0.999 → Excellent
