@@ -50,7 +50,8 @@ private:
 
     // R² on centered data: delta_v[i] = voltage_[i] - voltage_[0]
     // Avoids catastrophic cancellation on 8-bit AVR float
-    float calculateR2Centered(const float *x, const float *y, int n, float &a, float &b);
+    // x_progmem: if true, read x values via pgm_read_float (PROGMEM)
+    float calculateR2Centered(const float *x, const float *y, int n, float &a, float &b, bool x_progmem = false);
 };
 
 #endif

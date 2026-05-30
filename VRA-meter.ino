@@ -120,7 +120,13 @@ void loop() {
         if (cmd == 'a' || cmd == 'A') {
             auto_mode = !auto_mode;
             Serial.print(F("Auto mode: ")); Serial.println(auto_mode ? F("ON") : F("OFF"));
+            return;  // Don't measure on mode toggle — wait for next trigger
         }
+    }
+
+    // Manual mode: measure only on explicit character trigger
+    if (!auto_mode && !Serial.available()) {
+        return;
     }
 
     // Quick voltage check before measurement

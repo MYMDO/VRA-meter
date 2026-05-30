@@ -29,16 +29,17 @@ void VRA_Analyzer::killLoad() {
 // R² on centered data: works with delta_v[i] = V[i] - V[0]
 // Range ~0.000..0.010 V — fits entirely within float precision (7 digits)
 // Original formula S_yy = Σy² - (Σy)²/n would lose all precision on raw ~3.85V values
-float VRA_Analyzer::calculateR2Centered(const float *x, const float *y, int n, float &a, float &b) {
+float VRA_Analyzer::calculateR2Centered(const float *x, const float *y, int n, float &a, float &b, bool x_progmem) {
     if (n < 2) return 0.0f;
 
     float sum_x = 0, sum_y = 0, sum_xy = 0, sum_x2 = 0;
 
     for (int i = 0; i < n; i++) {
-        sum_x  += x[i];
+        float xi = x_progmem ? pgm_read_float(&x[i]) : x[i];
+        sum_x  += xi;
         sum_y  += y[i];
-        sum_xy += x[i] * y[i];
-        sum_x2 += x[i] * x[i];
+        sum_xy += xi * y[i];
+        sum_x2 += xi * xi;
     }
 
     float denom = (float)n * sum_x2 - sum_x * sum_x;
@@ -52,13 +53,17 @@ float VRA_Analyzer::calculateR2Centered(const float *x, const float *y, int n, f
     b = (sum_y - a * sum_x) / (float)n;
 
     // R² = 1 - SS_res / SS_tot
-    // For centered data, SS_tot ≈ Σ(y_i)² directly (mean ≈ 0)
+    // For centered data (ΔV = V[i] - V[0]), mean is NOT zero in general.
+    // Must use proper formula: SS_tot = Σ(y_i - ȳ)²
+    float y_mean = sum_y / (float)n;
     float ss_tot = 0, ss_res = 0;
 
     for (int i = 0; i < n; i++) {
-        float y_pred = a * x[i] + b;
+        float xi = x_progmem ? pgm_read_float(&x[i]) : x[i];
+        float y_pred = a * xi + b;
         ss_res += (y[i] - y_pred) * (y[i] - y_pred);
-        ss_tot += y[i] * y[i];
+        float y_diff = y[i] - y_mean;
+        ss_tot += y_diff * y_diff;
     }
 
     if (ss_tot < 1e-12f) return 1.0f;
@@ -161,7 +166,7 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
         result.soh_grade = 2;     // EXCELLENT
     } else {
         float a_coeff, b_coeff;
-        result.R_squared = calculateR2Centered(LOG_TIME, centered_v, RELAX_SAMPLES, a_coeff, b_coeff);
+        result.R_squared = calculateR2Centered(LOG_TIME, centered_v, RELAX_SAMPLES, a_coeff, b_coeff, true);
 
         // SOH grade based on R²
         if (result.R_squared > SOH_EXCELLENT) {

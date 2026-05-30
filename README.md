@@ -466,7 +466,7 @@ The trade-off: VRA provides fewer data points than a full Nyquist plot, but for 
 ### References
 
 1. Plett, G.L. "Extended Kalman filtering for battery management systems." *Journal of Power Sources*, 2004.
-2. farmsworth, B. et al. "Physical and chemical electrochemical impedance spectroscopy." *Electrochimica Acta*, 2013.
+2. Barsoukov, E. & Macdonald, J.R. "Impedance Spectroscopy: Theory, Experiment, and Applications." *Wiley*, 2005.
 3. Tian, H. et al. "A modified capacity calculation method for lithium-ion batteries based on voltage relaxation." *Journal of Power Sources*, 2020.
 
 ## License
