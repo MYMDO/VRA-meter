@@ -72,9 +72,16 @@ float VRA_Analyzer::calculateR2Centered(const float *x, const float *y, int n, f
 }
 
 bool VRA_Analyzer::measure(VRA_Result &result) {
+    result.error = VRA_ERR_NONE;
+
     // Safety: check battery voltage first
     float v_check = adc_->readVoltage();
+    if (adc_->hadI2CError()) {
+        result.error = VRA_ERR_I2C_FAULT;
+        return false;
+    }
     if (v_check < BATTERY_MIN_V || v_check > BATTERY_MAX_V) {
+        result.error = VRA_ERR_VOLTAGE_RANGE;
         return false;
     }
 
@@ -87,7 +94,15 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     delay(PRE_PULSE_SETTLE_MS);                     // Let voltage settle under load
 
     result.V_before = adc_->readVoltage();
-    result.I_load   = adc_->readCurrent();
+
+    // Read current with saturation detection
+    int16_t raw_shunt = adc_->readCurrentRaw();
+    if (raw_shunt >= ADC_SATURATION_THRESHOLD) {
+        killLoad();
+        result.error = VRA_ERR_ADC_SATURATED;
+        return false;
+    }
+    result.I_load = ((float)raw_shunt / 32767.0f) * FS_0256V / SHUNT_RESISTANCE;
 
     // --- Phase 2: Turn off load, capture relaxation curve ---
     unsigned long t_start = millis();
@@ -97,6 +112,14 @@ bool VRA_Analyzer::measure(VRA_Result &result) {
     // naturally filtering inductive ringing from MOSFET switching.
     adc_->startConversion(ADS1115_CH_VOLTAGE, VOLTAGE_PGA);
     delay(V_AFTER_SETTLE_MS);                       // Wait for conversion to complete
+
+    // Poll OS-bit to confirm conversion is done (guards against I2C jitter)
+    uint16_t os_attempts = 0;
+    while (!(adc_->readConfigReg() & ADS1115_CFG_OS) && os_attempts < 10) {
+        delay(1);
+        os_attempts++;
+    }
+
     result.V_after = adc_->readResult(FS_6144V);
 
     // Collect relaxation samples with precise timing

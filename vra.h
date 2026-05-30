@@ -10,6 +10,12 @@ class ADS1115;  // forward declaration
 // Stored in PROGMEM to save SRAM and skip runtime log() calls
 extern const float LOG_TIME[RELAX_SAMPLES] PROGMEM;
 
+// Error codes returned by measure()
+#define VRA_ERR_NONE            0
+#define VRA_ERR_VOLTAGE_RANGE   1   // battery voltage out of safe range
+#define VRA_ERR_ADC_SATURATED   2   // ADC current channel saturated (>2.5A)
+#define VRA_ERR_I2C_FAULT       3   // I2C bus error (NACK from ADS1115)
+
 // Results from a single VRA measurement cycle
 struct VRA_Result {
     float R_ohm;          // Ohmic resistance (Ω) — from instantaneous voltage jump
@@ -21,6 +27,7 @@ struct VRA_Result {
     float I_load;         // Current during pulse (A)
     float V_relaxation;   // Total relaxation voltage depth (V)
     uint8_t soh_grade;    // 0=Poor, 1=Good, 2=Excellent
+    uint8_t error;        // VRA_ERR_* code (0 = success)
 };
 
 class VRA_Analyzer {

@@ -38,13 +38,24 @@ public:
     float readCurrent();
     float readVoltage();
 
+    // Raw ADC reading for saturation detection (returns int16_t code)
+    int16_t readCurrentRaw();
+
+    // Read config register (for OS-bit polling)
+    uint16_t readConfigReg();
+
+    // I2C error flag — set if any write got NACK
+    bool hadI2CError() const { return last_i2c_error_; }
+
 private:
     void writeRegister(uint8_t reg, uint16_t value);
     uint16_t readRegister(uint8_t reg);
     void i2cStart();
     void i2cStop();
-    void i2cWriteByte(uint8_t data);
+    bool i2cWriteByte(uint8_t data);   // true=ACK, false=NACK
     uint8_t i2cReadByte(bool ack);
+
+    bool last_i2c_error_ = false;
 
     // Direct port manipulation for speed (~200kHz I2C)
     // ATmega328P: A4 = SDA = PC4, A5 = SCL = PC5
