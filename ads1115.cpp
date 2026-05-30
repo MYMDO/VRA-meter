@@ -1,7 +1,7 @@
 #include "ads1115.h"
 #include <Arduino.h>
 
-// Direct port manipulation for ATmega328P
+// --- Direct Port Manipulation for ATmega328P ---
 // A4 = SDA = PC4, A5 = SCL = PC5
 #define SDA_DDR   DDRC
 #define SDA_PORT  PORTC
@@ -13,18 +13,19 @@
 #define SCL_PINR  PINC
 #define SCL_BIT   5
 
-// Minimal I2C delay — one NOP = 62.5ns at 16MHz
-// I2C_NOP_COUNT NOPs ≈ 250ns per half-period → ~200kHz clock
+// NOP delay: 4 NOPs ≈ 250ns at 16MHz → ~200kHz I2C clock
 #define I2C_NOP() __asm__ __volatile__("nop\n\tnop\n\tnop\n\tnop")
 
-// sdaHigh() and sdaInput() are identical: set DDR bit to 0 (input mode)
-// Input mode lets the external pull-up pull SDA/SCL HIGH (open-drain I2C)
+// --- Low-level I2C Pin Control ---
+// sdaHigh/sclHigh: set DDR bit to 0 (input mode) — external pull-up pulls HIGH
+// sdaLow/sclLow:   set DDR bit to 1 (output) + clear PORT bit → driven LOW
 void ADS1115::sdaHigh() { SDA_DDR &= ~(1 << SDA_BIT); }
 void ADS1115::sdaLow()  { SDA_DDR |= (1 << SDA_BIT); SDA_PORT &= ~(1 << SDA_BIT); }
 void ADS1115::sclHigh() { SCL_DDR &= ~(1 << SCL_BIT); }
 void ADS1115::sclLow()  { SCL_DDR |= (1 << SCL_BIT); SCL_PORT &= ~(1 << SCL_BIT); }
 bool ADS1115::sdaRead() { return SDA_PINR & (1 << SDA_BIT); }
 
+// --- Bus Control ---
 void ADS1115::begin() {
     sdaHigh();
     sclHigh();
@@ -47,6 +48,7 @@ void ADS1115::i2cStop() {
     I2C_NOP();
 }
 
+// --- Byte-Level I2C ---
 bool ADS1115::i2cWriteByte(uint8_t data) {
     for (int i = 7; i >= 0; i--) {
         if (data & (1 << i))
@@ -59,8 +61,8 @@ bool ADS1115::i2cWriteByte(uint8_t data) {
         sclLow();
         I2C_NOP();
     }
-    // ACK — read SDA after 9th clock
-    sdaHigh(); // release SDA for ACK (input mode)
+    // Read ACK/NACK on 9th clock
+    sdaHigh();  // release SDA for slave response
     I2C_NOP();
     sclHigh();
     I2C_NOP();
@@ -72,7 +74,7 @@ bool ADS1115::i2cWriteByte(uint8_t data) {
 
 uint8_t ADS1115::i2cReadByte(bool ack) {
     uint8_t data = 0;
-    sdaHigh(); // release SDA for reading (input mode)
+    sdaHigh();  // release SDA for reading
     for (int i = 7; i >= 0; i--) {
         sclHigh();
         I2C_NOP();
@@ -81,7 +83,7 @@ uint8_t ADS1115::i2cReadByte(bool ack) {
         sclLow();
         I2C_NOP();
     }
-    // ACK/NAK
+    // Send ACK (LOW) or NACK (HIGH)
     if (ack)
         sdaLow();
     else
@@ -91,9 +93,11 @@ uint8_t ADS1115::i2cReadByte(bool ack) {
     I2C_NOP();
     sclLow();
     I2C_NOP();
-    sdaHigh(); // release
+    sdaHigh();  // release
     return data;
 }
+
+// --- Register-Level I2C ---
 
 void ADS1115::writeRegister(uint8_t reg, uint16_t value) {
     i2cStart();
@@ -116,10 +120,12 @@ uint16_t ADS1115::readRegister(uint8_t reg) {
     return ((uint16_t)msb << 8) | lsb;
 }
 
+// --- High-Level API ---
+
 float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
     startConversion(channel, pga);
-    delay(ADC_START_LEAD_MS);  // 860 SPS → 1.16ms, give margin
-    // Poll for completion
+    delay(ADC_START_LEAD_MS);
+    // Poll OS-bit for completion
     uint16_t attempts = 0;
     while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {
         delay(1);
@@ -130,17 +136,13 @@ float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
 
 void ADS1115::startConversion(uint8_t channel, uint16_t pga) {
     uint16_t mux = (channel == 0) ? MUX_A0_A1 : MUX_A2_A3;
-
     uint16_t config = ADS1115_CFG_OS
                     | mux
                     | pga
                     | ADS1115_CFG_MODE_SINGLE
                     | ADS1115_CFG_RATE_860
                     | ADS1115_CFG_COMP_QUE;
-
     writeRegister(ADS1115_REG_CONFIG, config);
-    // Conversion starts immediately after I2C write completes (~1ms)
-    // Takes ~1.16ms at 860 SPS → ready in ~2.2ms from now
 }
 
 float ADS1115::readResult(float fs) {
@@ -148,23 +150,7 @@ float ADS1115::readResult(float fs) {
     return ((float)raw / 32767.0f) * fs;
 }
 
-float ADS1115::readCurrent() {
-    float v_shunt = readDifferential(ADS1115_CH_CURRENT, CURRENT_PGA, FS_0256V);
-    return v_shunt / SHUNT_RESISTANCE;
-}
-
-float ADS1115::readVoltage() {
-    return readDifferential(ADS1115_CH_VOLTAGE, VOLTAGE_PGA, FS_6144V);
-}
-
-int16_t ADS1115::readCurrentRaw() {
-    startConversion(ADS1115_CH_CURRENT, CURRENT_PGA);
-    delay(ADC_START_LEAD_MS);
-    uint16_t attempts = 0;
-    while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {
-        delay(1);
-        if (++attempts > 100) break;
-    }
+int16_t ADS1115::readResultRaw() {
     return (int16_t)readRegister(ADS1115_REG_CONVERSION);
 }
 

@@ -7,29 +7,15 @@
 #define MOSFET_PIN       7        // Digital output: LOW = load ON, HIGH = load OFF
 #define ADS1115_ADDR     0x48     // I2C address (ADDR pin to GND)
 
-// --- ADS1115 Configuration ---
+// --- ADS1115 Channel Configuration ---
+// PGA settings, full-scale voltages, channel assignments, and saturation
+// threshold are all in ads1115.h (driver-level, not user-tunable).
+//
 /* PLATFORM WARNING:
  * Pull-ups to 5V (SDA/SCL) are ONLY safe for 5V boards (Uno, Nano ATmega328P).
  * For 3.3V boards (Due, Nano 33 BLE/IoT, Zero, RP2040):
  *   → Use pull-ups to 3.3V, NOT 5V!
  */
-// PGA gain settings (bits [11:9] in config register)
-#define PGA_6144V   0x0000
-#define PGA_4096V   0x0200
-#define PGA_2048V   0x0400  // default
-#define PGA_1024V   0x0600
-#define PGA_0512V   0x0800
-#define PGA_0256V   0x0A00
-
-// For current channel: ±256 mV range (max precision on shunt)
-#define CURRENT_PGA  PGA_0256V
-// For voltage channel: ±6.144 V range (covers up to 4.25V Li-ion full charge)
-// PGA_4096V would saturate at 4.096V — unsafe for fully charged 18650
-#define VOLTAGE_PGA  PGA_6144V
-
-// ADS1115 full-scale voltages for each PGA setting
-#define FS_0256V  0.256f
-#define FS_6144V  6.144f
 
 // --- Shunt Resistor ---
 #define SHUNT_RESISTANCE  0.1f   // Ohms
@@ -49,11 +35,12 @@
 #define BATTERY_MIN_V   2.5f   // Minimum voltage to allow test (V)
 #define BATTERY_MAX_V   4.3f   // Maximum voltage (overvoltage protection)
 #define MAX_CURRENT_A   2.5f   // Maximum allowed current (A) — limited by shunt (0.1Ω) and PGA ±256mV
-#define ADC_SATURATION_THRESHOLD  32700  // raw ADC code near full-scale → saturated
 
 // --- SOH Thresholds ---
-#define SOH_EXCELLENT   0.999f // R² > 0.999 → Excellent
-#define SOH_GOOD        0.95f  // R² > 0.95  → Good
+// R² threshold values for SOH grading (used in vra.cpp)
+// Named with _THRESH suffix to avoid conflict with enum SOH_Grade members
+#define SOH_EXCELLENT_THRESHOLD  0.999f // R² > 0.999 → Excellent
+#define SOH_GOOD_THRESHOLD       0.95f  // R² > 0.95  → Good
 // R² < 0.95 → Poor / damaged
 
 // --- Safety ---

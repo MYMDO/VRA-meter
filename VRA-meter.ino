@@ -2,11 +2,15 @@
 #include "ads1115.h"
 #include "vra.h"
 
-ADS1115 adc;
+ADS1115 ads;
 VRA_Analyzer vra;
 
 unsigned long measurement_count = 0;
 bool auto_mode = false;
+
+// ============================================================================
+// Serial Output Helpers
+// ============================================================================
 
 void printSeparator() {
     Serial.println(F("========================================"));
@@ -76,7 +80,7 @@ void printResult(const VRA_Result &r, unsigned long num) {
     Serial.print(F("  Assessment: ")); Serial.println(assessment);
     Serial.println();
 
-    // Print relaxation data points for graphing
+    // Relaxation data points for graphing / export
     Serial.println(F("  [Relaxation Data]"));
     Serial.println(F("  t(ms)   V(V)"));
     for (int i = 0; i < RELAX_SAMPLES; i++) {
@@ -91,18 +95,22 @@ void printResult(const VRA_Result &r, unsigned long num) {
     Serial.println();
 }
 
+// ============================================================================
+// Setup
+// ============================================================================
+
 void setup() {
     Serial.begin(115200);
     while (!Serial) { ; }
 
     // Glitch-free MOSFET init: enable internal pull-up (weak HIGH) first,
-    // then switch to OUTPUT. This prevents a brief LOW→HIGH transition
+    // then switch to OUTPUT. Prevents a brief LOW→HIGH transition
     // that would momentarily turn on the load.
     digitalWrite(MOSFET_PIN, HIGH);
     pinMode(MOSFET_PIN, OUTPUT);
 
-    adc.begin();
-    vra.begin(adc);
+    ads.begin();
+    vra.begin(ads);
 
     printBanner();
     printVoltageScale();
@@ -112,24 +120,28 @@ void setup() {
     Serial.println();
 }
 
+// ============================================================================
+// Loop — serial command handler + measurement trigger
+// ============================================================================
+
 void loop() {
-    // Check for serial commands
+    // Handle serial commands
     if (Serial.available()) {
         char cmd = Serial.read();
         if (cmd == 'a' || cmd == 'A') {
             auto_mode = !auto_mode;
             Serial.print(F("Auto mode: ")); Serial.println(auto_mode ? F("ON") : F("OFF"));
-            return;  // Don't measure on mode toggle — wait for next trigger
+            return;  // don't measure on mode toggle
         }
     }
 
-    // Manual mode: measure only on explicit character trigger
+    // Manual mode: wait for explicit trigger
     if (!auto_mode && !Serial.available()) {
         return;
     }
 
-    // Quick voltage check before measurement
-    float v_check = adc.readVoltage();
+    // Pre-measurement voltage check
+    float v_check = ads.readDifferential(ADS1115_CH_VOLTAGE, VOLTAGE_PGA, FS_6144V);
     Serial.print(F("Battery: ")); Serial.print(v_check, 3); Serial.print(F("V ... "));
 
     if (v_check < BATTERY_MIN_V) {
@@ -145,6 +157,7 @@ void loop() {
 
     Serial.println(F("Measuring..."));
 
+    // Run VRA measurement
     VRA_Result result;
     if (vra.measure(result)) {
         measurement_count++;
@@ -167,7 +180,7 @@ void loop() {
     }
 
     if (auto_mode) {
-        delay(1000); // 1 second between measurements in auto mode
+        delay(1000);
     } else {
         Serial.println(F("Send any character for next measurement, 'a' for auto-mode."));
     }

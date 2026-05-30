@@ -167,10 +167,10 @@ For accurate voltage measurement, use **4-wire Kelvin sensing**:
 
 ```
 VRA-meter/
-├── VRA-meter.ino        Main sketch — setup, loop, serial UI
-├── config.h            All tunable parameters (pins, timing, thresholds)
-├── ads1115.h/.cpp      Bit-banged I2C driver for ADS1115 (direct port, ~200kHz)
-└── vra.h/.cpp          VRA analysis: R², logarithmic regression, SOH grading
+├── VRA-meter.ino        Entry point, serial UI, measurement trigger
+├── config.h             User-tunable parameters (pins, timing, thresholds)
+├── ads1115.h/.cpp       Bit-banged I2C driver (direct port, ~200kHz) for ADS1115
+└── vra.h/.cpp           VRA analysis: R², logarithmic regression, SOH grading
 ```
 
 ### Key Design Decisions
@@ -407,7 +407,7 @@ All tunable parameters are in `config.h`:
 |-----------|---------|-------------|
 | `BATTERY_MIN_V` | `2.5` V | Minimum allowed voltage |
 | `BATTERY_MAX_V` | `4.3` V | Maximum allowed voltage (overvoltage protection) |
-| `MAX_CURRENT_A` | `5.0` A | Maximum allowed current |
+| `MAX_CURRENT_A` | `2.5` A | Maximum allowed current (limited by shunt + PGA) |
 | `SAFETY_TIMEOUT_MS` | `2000` ms | Hard kill-switch for MOSFET (I2C hang protection) |
 | `MIN_RELAX_MV` | `4.0` mV | Minimum relaxation amplitude for valid R² (quantization guard) |
 
