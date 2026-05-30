@@ -43,7 +43,7 @@
 // --- Battery Thresholds ---
 #define BATTERY_MIN_V   2.5f   // Minimum voltage to allow test (V)
 #define BATTERY_MAX_V   4.3f   // Maximum voltage (overvoltage protection)
-#define MAX_CURRENT_A   5.0f   // Maximum allowed current (A)
+#define MAX_CURRENT_A   2.5f   // Maximum allowed current (A) — limited by shunt (0.1Ω) and PGA ±256mV
 
 // --- SOH Thresholds ---
 #define SOH_EXCELLENT   0.999f // R² > 0.999 → Excellent
