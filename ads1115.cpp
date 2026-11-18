@@ -1,159 +1,143 @@
 #include "ads1115.h"
-#include <Arduino.h>
+#include "config.h"
 
-// --- Direct Port Manipulation for ATmega328P ---
-// A4 = SDA = PC4, A5 = SCL = PC5
-#define SDA_DDR   DDRC
-#define SDA_PORT  PORTC
-#define SDA_PINR  PINC
-#define SDA_BIT   4
+#if !defined(__AVR_ATmega328P__) || F_CPU != 16000000UL
+#error "VRA Meter requires a 16 MHz ATmega328P (Uno or classic Nano)."
+#endif
 
-#define SCL_DDR   DDRC
-#define SCL_PORT  PORTC
-#define SCL_PINR  PINC
-#define SCL_BIT   5
+#include <util/delay.h>
 
-// NOP delay: 4 NOPs ≈ 250ns at 16MHz → ~200kHz I2C clock
-#define I2C_NOP() __asm__ __volatile__("nop\n\tnop\n\tnop\n\tnop")
+namespace {
+constexpr uint8_t SDA_MASK = _BV(PC4);
+constexpr uint8_t SCL_MASK = _BV(PC5);
+constexpr uint8_t REG_CONVERSION = 0x00;
+constexpr uint8_t REG_CONFIG = 0x01;
+constexpr uint16_t READY = 0x8000;
+constexpr uint16_t SINGLE_SHOT_860 = 0x01C3;
+constexpr uint16_t CURRENT_CONFIG = SINGLE_SHOT_860 | 0x0A00; // A0-A1, +/-0.256 V
+constexpr uint16_t VOLTAGE_CONFIG = SINGLE_SHOT_860 | 0x3000; // A2-A3, +/-6.144 V
+constexpr int16_t SATURATION = 32700;
+constexpr unsigned long ADC_TIMEOUT_US = 4000UL;
 
-// --- Low-level I2C Pin Control ---
-// sdaHigh/sclHigh: set DDR bit to 0 (input mode) — external pull-up pulls HIGH
-// sdaLow/sclLow:   set DDR bit to 1 (output) + clear PORT bit → driven LOW
-void ADS1115::sdaHigh() { SDA_DDR &= ~(1 << SDA_BIT); }
-void ADS1115::sdaLow()  { SDA_DDR |= (1 << SDA_BIT); SDA_PORT &= ~(1 << SDA_BIT); }
-void ADS1115::sclHigh() { SCL_DDR &= ~(1 << SCL_BIT); }
-void ADS1115::sclLow()  { SCL_DDR |= (1 << SCL_BIT); SCL_PORT &= ~(1 << SCL_BIT); }
-bool ADS1115::sdaRead() { return SDA_PINR & (1 << SDA_BIT); }
+void sdaRelease() { DDRC &= ~SDA_MASK; }
+void sdaLow() { DDRC |= SDA_MASK; }
+void sclRelease() { DDRC &= ~SCL_MASK; }
+void sclLow() { DDRC |= SCL_MASK; }
+bool sdaIsHigh() { return PINC & SDA_MASK; }
+}
 
-// --- Bus Control ---
 void ADS1115::begin() {
-    sdaHigh();
-    sclHigh();
-    i2cStop();
+    sdaRelease();
+    sclRelease();
+    PORTC &= ~(SDA_MASK | SCL_MASK); // Open drain with external pull-ups.
 }
 
-void ADS1115::i2cStart() {
+bool ADS1115::clockHigh() {
+    sclRelease();
+    _delay_us(3);
+    return PINC & SCL_MASK; // ADS1115 does not require clock stretching.
+}
+
+bool ADS1115::startBus() {
+    sdaRelease();
+    _delay_us(3);
+    if (!clockHigh() || !sdaIsHigh()) return false;
     sdaLow();
-    I2C_NOP();
+    _delay_us(3);
     sclLow();
-    I2C_NOP();
+    return true;
 }
 
-void ADS1115::i2cStop() {
+bool ADS1115::stopBus() {
+    sclLow();
     sdaLow();
-    I2C_NOP();
-    sclHigh();
-    I2C_NOP();
-    sdaHigh();
-    I2C_NOP();
+    _delay_us(3);
+    const bool clockReleased = clockHigh();
+    sdaRelease();
+    _delay_us(3);
+    return clockReleased && sdaIsHigh();
 }
 
-// --- Byte-Level I2C ---
-bool ADS1115::i2cWriteByte(uint8_t data) {
-    for (int i = 7; i >= 0; i--) {
-        if (data & (1 << i))
-            sdaHigh();
-        else
-            sdaLow();
-        I2C_NOP();
-        sclHigh();
-        I2C_NOP();
+bool ADS1115::writeByte(uint8_t data) {
+    for (uint8_t mask = 0x80; mask; mask >>= 1) {
+        if (data & mask) sdaRelease();
+        else sdaLow();
+        _delay_us(3);
+        if (!clockHigh()) return false;
         sclLow();
-        I2C_NOP();
     }
-    // Read ACK/NACK on 9th clock
-    sdaHigh();  // release SDA for slave response
-    I2C_NOP();
-    sclHigh();
-    I2C_NOP();
-    bool ack = sdaRead();  // LOW = ACK, HIGH = NACK
+
+    sdaRelease();
+    _delay_us(3);
+    if (!clockHigh()) return false;
+    const bool acknowledged = !sdaIsHigh();
     sclLow();
-    I2C_NOP();
-    return ack;
+    return acknowledged;
 }
 
-uint8_t ADS1115::i2cReadByte(bool ack) {
-    uint8_t data = 0;
-    sdaHigh();  // release SDA for reading
-    for (int i = 7; i >= 0; i--) {
-        sclHigh();
-        I2C_NOP();
-        if (sdaRead()) data |= (1 << i);
-        I2C_NOP();
+bool ADS1115::readByte(bool ack, uint8_t &data) {
+    data = 0;
+    sdaRelease();
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+        _delay_us(3);
+        if (!clockHigh()) return false;
+        data = (data << 1) | sdaIsHigh();
         sclLow();
-        I2C_NOP();
     }
-    // Send ACK (LOW) or NACK (HIGH)
-    if (ack)
-        sdaLow();
-    else
-        sdaHigh();
-    I2C_NOP();
-    sclHigh();
-    I2C_NOP();
+
+    if (ack) sdaLow();
+    _delay_us(3);
+    const bool clockReleased = clockHigh();
     sclLow();
-    I2C_NOP();
-    sdaHigh();  // release
-    return data;
+    sdaRelease();
+    return clockReleased;
 }
 
-// --- Register-Level I2C ---
-
-void ADS1115::writeRegister(uint8_t reg, uint16_t value) {
-    i2cStart();
-    if (!i2cWriteByte((ADS1115_ADDR << 1) | 0)) { last_i2c_error_ = true; i2cStop(); return; }
-    if (!i2cWriteByte(reg))                      { last_i2c_error_ = true; i2cStop(); return; }
-    if (!i2cWriteByte((uint8_t)(value >> 8)))    { last_i2c_error_ = true; i2cStop(); return; }
-    if (!i2cWriteByte((uint8_t)(value & 0xFF)))  { last_i2c_error_ = true; i2cStop(); return; }
-    i2cStop();
+bool ADS1115::writeRegister(uint8_t reg, uint16_t value) {
+    const bool written = startBus() && writeByte(ADS1115_ADDR << 1)
+        && writeByte(reg) && writeByte(value >> 8) && writeByte(value & 0xFF);
+    return stopBus() && written;
 }
 
-uint16_t ADS1115::readRegister(uint8_t reg) {
-    i2cStart();
-    if (!i2cWriteByte((ADS1115_ADDR << 1) | 0)) { last_i2c_error_ = true; i2cStop(); return 0; }
-    if (!i2cWriteByte(reg))                      { last_i2c_error_ = true; i2cStop(); return 0; }
-    i2cStart();
-    if (!i2cWriteByte((ADS1115_ADDR << 1) | 1)) { last_i2c_error_ = true; i2cStop(); return 0; }
-    uint8_t msb = i2cReadByte(true);
-    uint8_t lsb = i2cReadByte(false);
-    i2cStop();
-    return ((uint16_t)msb << 8) | lsb;
+bool ADS1115::readRegister(uint8_t reg, uint16_t &value) {
+    uint8_t high, low;
+    const bool received = startBus() && writeByte(ADS1115_ADDR << 1)
+        && writeByte(reg) && startBus() && writeByte((ADS1115_ADDR << 1) | 1)
+        && readByte(true, high) && readByte(false, low);
+    if (!stopBus() || !received) return false;
+    value = (static_cast<uint16_t>(high) << 8) | low;
+    return true;
 }
 
-// --- High-Level API ---
+ADCStatus ADS1115::startConversion(ADCChannel channel) {
+    config_ = channel == ADCChannel::Current ? CURRENT_CONFIG : VOLTAGE_CONFIG;
+    if (!writeRegister(REG_CONFIG, READY | config_)) return ADCStatus::BusFault;
+    started_us_ = micros();
+    return ADCStatus::Ok;
+}
 
-float ADS1115::readDifferential(uint8_t channel, uint16_t pga, float fs) {
-    startConversion(channel, pga);
-    delay(ADC_START_LEAD_MS);
-    // Poll OS-bit for completion
-    uint16_t attempts = 0;
-    while (!(readRegister(ADS1115_REG_CONFIG) & ADS1115_CFG_OS)) {
-        delay(1);
-        if (++attempts > 100) break;
+ADCStatus ADS1115::readResult(float &volts) {
+    // Allow single-shot power-up before polling the OS bit.
+    while (micros() - started_us_ < 100UL) {}
+    uint16_t config;
+    for (;;) {
+        if (!readRegister(REG_CONFIG, config) || (config & ~READY) != config_) {
+            return ADCStatus::BusFault;
+        }
+        if (config & READY) break;
+        if (micros() - started_us_ >= ADC_TIMEOUT_US) return ADCStatus::Timeout;
     }
-    return readResult(fs);
+
+    uint16_t value;
+    if (!readRegister(REG_CONVERSION, value)) return ADCStatus::BusFault;
+    const int16_t raw = static_cast<int16_t>(value);
+    if (raw >= SATURATION || raw <= -SATURATION) return ADCStatus::Saturated;
+    const float fullScale = config_ == CURRENT_CONFIG ? 0.256f : 6.144f;
+    volts = raw * (fullScale / 32768.0f);
+    return ADCStatus::Ok;
 }
 
-void ADS1115::startConversion(uint8_t channel, uint16_t pga) {
-    uint16_t mux = (channel == 0) ? MUX_A0_A1 : MUX_A2_A3;
-    uint16_t config = ADS1115_CFG_OS
-                    | mux
-                    | pga
-                    | ADS1115_CFG_MODE_SINGLE
-                    | ADS1115_CFG_RATE_860
-                    | ADS1115_CFG_COMP_QUE;
-    writeRegister(ADS1115_REG_CONFIG, config);
-}
-
-float ADS1115::readResult(float fs) {
-    int16_t raw = (int16_t)readRegister(ADS1115_REG_CONVERSION);
-    return ((float)raw / 32767.0f) * fs;
-}
-
-int16_t ADS1115::readResultRaw() {
-    return (int16_t)readRegister(ADS1115_REG_CONVERSION);
-}
-
-uint16_t ADS1115::readConfigReg() {
-    return readRegister(ADS1115_REG_CONFIG);
+ADCStatus ADS1115::read(ADCChannel channel, float &volts) {
+    const ADCStatus status = startConversion(channel);
+    return status == ADCStatus::Ok ? readResult(volts) : status;
 }

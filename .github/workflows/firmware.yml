@@ -1,0 +1,25 @@
+name: Firmware checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          path: VRA-meter
+      - uses: arduino/setup-arduino-cli@7ef629dcdf0f458ab7ae83149d629443deac6eac # v2.0.0
+        with:
+          version: '1.6.0'
+      - run: bash tests/run.sh
+        working-directory: VRA-meter
+      - run: arduino-cli core install arduino:avr@1.8.6
+      - run: arduino-cli compile --fqbn arduino:avr:uno --warnings all VRA-meter
+      - run: arduino-cli compile --fqbn arduino:avr:nano:cpu=atmega328 --warnings all VRA-meter
