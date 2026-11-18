@@ -27,6 +27,7 @@ bool sdaIsHigh() { return PINC & SDA_MASK; }
 }
 
 void ADS1115::begin() {
+    pending_ = false;
     sdaRelease();
     sclRelease();
     PORTC &= ~(SDA_MASK | SCL_MASK); // Open drain with external pull-ups.
@@ -110,13 +111,17 @@ bool ADS1115::readRegister(uint8_t reg, uint16_t &value) {
 }
 
 ADCStatus ADS1115::startConversion(ADCChannel channel) {
+    pending_ = false;
     config_ = channel == ADCChannel::Current ? CURRENT_CONFIG : VOLTAGE_CONFIG;
     if (!writeRegister(REG_CONFIG, READY | config_)) return ADCStatus::BusFault;
     started_us_ = micros();
+    pending_ = true;
     return ADCStatus::Ok;
 }
 
 ADCStatus ADS1115::readResult(float &volts) {
+    if (!pending_) return ADCStatus::BusFault;
+    pending_ = false;
     // Allow single-shot power-up before polling the OS bit.
     while (micros() - started_us_ < 100UL) {}
     uint16_t config;

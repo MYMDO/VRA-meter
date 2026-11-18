@@ -27,6 +27,11 @@ void printReading(const __FlashStringHelper *label, float value,
 }
 
 void printResult(const VRAResult &result) {
+    printReading(F("Pulse R:      "), result.pulse_resistance * 1000.0f, 1, F(" mOhm"));
+    printReading(F("Pulse width:  "), result.pulse_width_us / 1000.0f, 2, F(" ms"));
+    printReading(F("I trigger:    "), result.current_trigger_us / 1000.0f, 2, F(" ms after load on"));
+    printReading(F("V_load trigger: "), result.loaded_trigger_us / 1000.0f, 2, F(" ms after load on"));
+    printReading(F("V_first trigger: "), result.first_trigger_us / 1000.0f, 2, F(" ms after load off"));
     printReading(F("V_open:     "), result.open_voltage, 4, F(" V"));
     printReading(F("V_load:     "), result.loaded_voltage, 4, F(" V"));
     printReading(F("V_first:    "), result.first_voltage, 4, F(" V"));
@@ -39,7 +44,7 @@ void printResult(const VRAResult &result) {
     } else {
         Serial.println(F("Log fit R^2:  N/A (recovery samples span less than the fit threshold)"));
     }
-    if (result.step_resistance < 0 || result.recovery_resistance < 0) {
+    if (result.pulse_resistance < 0 || result.step_resistance < 0 || result.recovery_resistance < 0) {
         Serial.println(F("Negative resistance estimate: check contacts and repeat the test."));
     }
 }
@@ -57,6 +62,9 @@ void printError(const VRAResult &result) {
             break;
         case VRAError::CurrentHigh:
             printReading(F("ERROR: Load current exceeds configured limit: "), result.current, 3, F(" A"));
+            break;
+        case VRAError::ShuntZero:
+            printReading(F("ERROR: Shunt not near zero with load off: "), result.zero_shunt_voltage * 1000.0f, 2, F(" mV"));
             break;
         case VRAError::ADCBus:
             Serial.println(F("ERROR: ADS1115 bus fault. Check supply, SDA/SCL pull-ups and address."));
@@ -81,11 +89,13 @@ void exportCurve() {
         Serial.println(F("No valid curve. Run a successful measurement first."));
         return;
     }
-    Serial.println(F("nominal_time_ms,voltage_V"));
+    Serial.println(F("nominal_time_ms,voltage_V,trigger_us_after_release"));
     for (uint8_t i = 0; i < RELAX_SAMPLES; ++i) {
         Serial.print((i + 1UL) * RELAX_SAMPLE_STEP_US / 1000);
         Serial.print(',');
-        Serial.println(vra.voltageSample(i), 5);
+        Serial.print(vra.voltageSample(i), 5);
+        Serial.print(',');
+        Serial.println(static_cast<unsigned long>(vra.sampleTriggerUs(i)));
     }
 }
 

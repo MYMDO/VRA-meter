@@ -66,6 +66,7 @@ int main() {
     ADS1115 adc;
     adc.begin();
     float voltage = 123.0f;
+    assert(adc.readResult(voltage) == ADCStatus::BusFault);
 
     start();
     writtenByte(false);
@@ -78,6 +79,7 @@ int main() {
     registerRead(20000);
     assert(adc.read(ADCChannel::Voltage, voltage) == ADCStatus::Ok);
     assert(std::fabs(voltage - 3.75f) < 0.00001f && pin_reads.empty());
+    assert(adc.readResult(voltage) == ADCStatus::BusFault);
 
     registerWrite();
     registerRead(0x8BC3);
