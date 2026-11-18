@@ -12,6 +12,7 @@ public:
     ADCStatus read(ADCChannel channel, float &volts);
     ADCStatus startConversion(ADCChannel channel);
     ADCStatus readResult(float &volts);
+    unsigned long conversionStartedUs() const { return started_us_; }
 
 private:
     bool startBus();
@@ -22,6 +23,7 @@ private:
     bool writeRegister(uint8_t reg, uint16_t value);
     bool readRegister(uint8_t reg, uint16_t &value);
 
+    bool pending_ = false;
     uint16_t config_ = 0;
     unsigned long started_us_ = 0;
 };

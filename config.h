@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VERSION "1.1"
+#define VERSION "1.2"
 
 // 5 V, 16 MHz ATmega328P. D7 HIGH turns on the documented low-side N-MOSFET.
 #define MOSFET_PIN              7
@@ -15,6 +15,7 @@
 #define BATTERY_MAX_V           4.25f
 #define MIN_CURRENT_A           0.05f
 #define MAX_CURRENT_A           0.50f
+#define MAX_ZERO_SHUNT_MV       1.0f   // Abort if the unloaded shunt drop exceeds this magnitude
 #define COOLDOWN_MS             1000UL
 
 #define PULSE_DURATION_US       200000UL

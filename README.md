@@ -1,8 +1,8 @@
 # VRA Meter
 
-VRA Meter is an experimental 5 V Arduino instrument for measuring how the voltage of a single Li-ion cell recovers after a short load pulse. It reports terminal voltages, load current, two pulse-resistance estimates, and the fit of a logarithmic curve. You can export the 30 recovery samples as CSV for comparison across tests.
+VRA Meter is an experimental 5 V Arduino instrument for comparing the short-pulse response of single Li-ion cells under matched conditions. Its primary result is near-end pulse resistance (DCIR estimate). It also reports the voltage recovery and exports the time-stamped curve as CSV. See the [measurement audit](docs/measurement-audit.md) for the method, limits, and proposed bench acceptance criteria.
 
-**Before upgrading from v1.0, disconnect the cell and check the load wiring.** Version 1.1 uses D7 **HIGH = ON**, with a gate pull-down to GND. The v1.0 instructions specified a gate pull-up and the opposite control polarity. Rewire any earlier build to the circuit below before powering or uploading.
+**Before upgrading from v1.0, disconnect the cell and check the load wiring.** Versions 1.1 and later use D7 **HIGH = ON**, with a gate pull-down to GND. The v1.0 instructions specified a gate pull-up and the opposite control polarity. Rewire any earlier build to the circuit below before powering or uploading.
 
 ## Hardware
 
@@ -41,7 +41,7 @@ Hardware references · [ADS1115 datasheet](https://www.ti.com/lit/ds/symlink/ads
 | `c` | Export the curve from the latest successful attempt. Every new attempt replaces or invalidates the prior curve. |
 | `?` | Show commands. |
 
-Line endings are optional. Automatic and manual attempts share a one-second cooldown measured from the end of acquisition. During a measurement the firmware performs acquisition without processing commands. An `a` command received during that interval is processed after the result.
+Line endings are optional. Automatic and manual attempts share a one-second cooldown measured from the end of each attempt. During a measurement the firmware performs acquisition without processing commands. An `a` command received during that interval is processed after the result.
 
 For Arduino CLI, run from the repository directory:
 
@@ -55,13 +55,15 @@ arduino-cli compile --fqbn arduino:avr:nano:cpu=atmega328 --warnings all .
 
 | Output | Meaning |
 |---|---|
-| `V_open`, `V_load`, `V_first`, `V_final` | Before the pulse, near the end of the loaded pulse, first conversion after release, and final recovery sample. |
-| Step R | `(V_first − V_load) / I_load`. This is a short-pulse resistance estimate. The first ADC conversion integrates over a finite window after release. |
-| Recovery R | `(V_final − V_first) / I_load`. This expresses the additional recovery within the recorded window in ohms. |
-| Log fit R² | Agreement with an empirical logarithmic fit. A span below 4 mV produces `N/A`. R² describes the recorded curve, and provides no standalone assessment of cell health, capacity or safety. |
-| CSV time | Nominal read schedule at 10–300 ms after release. Conversion starts about 2 ms ahead of each read. The ADC integrates before the nominal time. |
+| Pulse R | `(V_open − V_load) / I_load`. Near-end pulse resistance, the primary comparison metric. |
+| `V_open`, `V_load`, `V_first`, `V_final` | Pre-pulse terminal voltage, loaded voltage near pulse end, first conversion after release, and last recovery sample. |
+| Load current and timing | The late shunt reading has its pre-pulse zero subtracted. The screen shows the commanded pulse width and ADC trigger times for late current, late voltage and first recovery voltage. Current and voltage use successive conversions. |
+| Step R | `(V_first − V_load) / I_load`. The first post-release conversion integrates over a finite window. |
+| Recovery R | `(V_final − V_first) / I_load`. The additional voltage recovery in the recorded window, expressed in ohms. |
+| Log fit R² | Descriptive agreement with a logarithmic fit. A recovery-curve span below 4 mV produces `N/A`. Capacity, state of health, and safety are outside the measurement. |
+| Curve CSV | Columns are `nominal_time_ms,voltage_V,trigger_us_after_release`. The new third column records the end of the ADC start transaction and is used for the fit. This is a proxy for conversion start. The integration window comes before the nominal read. |
 
-The default pulse is 200 ms. When comparing cells, use the same charge state, cell temperature, fixture, load, and rest period. Record signed estimates as measured. If a resistance estimate is negative, check contacts, sense-wire routing and repeatability before interpreting it. A separate capacity test and calibrated AC impedance measurement are needed if those quantities are required.
+Use manual measurements for cell comparisons. Match the cell model, charge state, temperature, fixture, pulse protocol and rest period. The one-second automatic cooldown only limits how often the instrument pulses. For precision work, record stability and use a separate capacity test or AC impedance measurement if those quantities are needed. If a resistance estimate is negative, check contacts and baseline drift before interpretation.
 
 ## Verification and readiness
 
@@ -73,7 +75,7 @@ The firmware has no external Arduino libraries. GitHub Actions compiles Uno and 
 | Normal pulse on a current-limited supply | Scope shows approximately 200 ms on D7 and the expected current for the load. ADS1115 transactions are acknowledged and sample timing is stable. |
 | ADC or load faults | Disconnect the ADC or interrupt the load path in a controlled bench setup. Expect a specific error, D7 off, no exported curve, and auto mode stopped. |
 | Voltage outside the configured range | No pulse before initial validation. If voltage crosses the boundary under test, the next loaded voltage check aborts. |
-| Known DC source and reference shunt | Compare both ADC channels against a DMM. Repeat with a known series resistance to assess resolution and fixture error. |
+| Known DC source and reference shunt | Compare both ADC channels against a DMM. Insert a known series resistor between the source and the test fixture, inside the voltage-sense taps. Compare the change in Pulse R with the reference value. |
 
 Bench validation is pending. Validate the wiring, time windows, repeatability, and fault response before using measurements to make decisions.
 
