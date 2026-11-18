@@ -18,7 +18,7 @@ struct Reading {
 
 enum ReadingIndex {
     Open, ZeroShunt, EarlyVoltage, EarlyCurrent, LateCurrent, LateVoltage,
-    FirstRecovery, CurveStart
+    FirstRecovery, ReleasedShunt, CurveStart
 };
 
 std::vector<Reading> responses;
@@ -27,6 +27,7 @@ std::vector<unsigned long> sample_starts;
 constexpr unsigned long MICROS_TICK_US = 4;
 unsigned long time_us = 0;
 float curve_amplitude = 0;
+size_t delayed_start_index;
 unsigned long turn_on_us = 0, turn_off_us = 0;
 unsigned pulses = 0;
 bool load_on = false;
@@ -34,6 +35,7 @@ bool output_enabled = false;
 
 void scenario(float amplitude = 0.006f) {
     response_index = 0;
+    delayed_start_index = static_cast<size_t>(-1);
     curve_amplitude = amplitude;
     sample_starts.clear();
     responses = {
@@ -44,6 +46,7 @@ void scenario(float amplitude = 0.006f) {
         {ADCChannel::Current, 0.0375f, ADCStatus::Ok, 0}, // near the release
         {ADCChannel::Voltage, 3.7f, ADCStatus::Ok, 0},
         {ADCChannel::Voltage, 3.88f, ADCStatus::Ok, 0}, // first conversion after release
+        {ADCChannel::Current, 0.0005f, ADCStatus::Ok, 0},
     };
     for (uint8_t i = 0; i < RELAX_SAMPLES; ++i) {
         responses.push_back({ADCChannel::Voltage, 0.0f, ADCStatus::Ok, 0});
@@ -94,6 +97,7 @@ ADCStatus ADS1115::startConversion(ADCChannel channel) {
     assert(responses[response_index].channel == channel);
     assert(load_on == (response_index >= EarlyVoltage && response_index <= LateVoltage));
     time_us += 300;
+    if (response_index == delayed_start_index) time_us += MAX_TIMING_OVERRUN_US;
     started_us_ = time_us;
     if (response_index >= CurveStart) sample_starts.push_back(time_us - turn_off_us);
     return ADCStatus::Ok;
@@ -104,7 +108,7 @@ ADCStatus ADS1115::readResult(float &volts) {
     const Reading reading = responses.at(index);
     time_us += 700 + reading.extra_us;
     if (reading.status == ADCStatus::Ok) {
-        volts = index < CurveStart ? reading.voltage : 3.88f + curve_amplitude *
+        volts = index < CurveStart ? reading.voltage : 3.88f + reading.voltage + curve_amplitude *
             std::log(static_cast<float>(started_us_ - turn_off_us) / sample_starts.front());
     }
     return reading.status;
@@ -189,7 +193,37 @@ int main() {
     responses[CurveStart].extra_us = MAX_TIMING_OVERRUN_US;
     assert(!meter.measure(result) && result.error == VRAError::Timing && !load_on);
 
+    scenario();
+    responses[ReleasedShunt].voltage = 0.038f;
+    assert(!meter.measure(result) && result.error == VRAError::ResidualCurrent);
+    assert(response_index == CurveStart && !load_on && sample_starts.empty());
+    scenario();
+    responses[ReleasedShunt].status = ADCStatus::BusFault;
+    assert(!meter.measure(result) && result.error == VRAError::ADCBus && !load_on);
+    scenario();
+    responses[ReleasedShunt].extra_us = RELAX_SAMPLE_STEP_US;
+    assert(!meter.measure(result) && result.error == VRAError::Timing && sample_starts.empty());
+    scenario();
+    responses[FirstRecovery].voltage = 0;
+    assert(!meter.measure(result) && result.error == VRAError::RecoveryVoltage);
+    scenario();
+    responses.back().voltage = 1.0f;
+    assert(!meter.measure(result) && result.error == VRAError::RecoveryVoltage);
+    assert(result.recovery_fault_voltage > BATTERY_MAX_V && !result.fit_valid);
+    scenario();
+    responses[LateCurrent].extra_us = FINAL_SAMPLE_LEAD_US;
+    assert(!meter.measure(result) && result.error == VRAError::Timing && !load_on);
+    assert(response_index == LateVoltage);
+
+    for (auto index : {FirstRecovery, CurveStart}) {
+        scenario();
+        delayed_start_index = index;
+        assert(!meter.measure(result) && result.error == VRAError::Timing && !load_on);
+    }
+
     setup();
+    input('x');
+    assert(Serial.output.find("Unknown command") != std::string::npos);
     const unsigned before = pulses;
     scenario();
     input('m');  // Single byte, without CR/LF.

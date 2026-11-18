@@ -41,7 +41,7 @@ Hardware references · [ADS1115 datasheet](https://www.ti.com/lit/ds/symlink/ads
 | `c` | Export the curve from the latest successful attempt. Every new attempt replaces or invalidates the prior curve. |
 | `?` | Show commands. |
 
-Line endings are optional. Automatic and manual attempts share a one-second cooldown measured from the end of each attempt. During a measurement the firmware performs acquisition without processing commands. An `a` command received during that interval is processed after the result.
+Line endings are optional. Automatic and manual attempts share a one-second cooldown measured from the end of each attempt. During a measurement the firmware performs acquisition without processing commands. An `a` command received during that interval is processed after the result. Unknown commands print a help hint.
 
 For Arduino CLI, run from the repository directory:
 
@@ -62,6 +62,8 @@ arduino-cli compile --fqbn arduino:avr:nano:cpu=atmega328 --warnings all .
 | Recovery R | `(V_final − V_first) / I_load`. The additional voltage recovery in the recorded window, expressed in ohms. |
 | Log fit R² | Descriptive agreement with a logarithmic fit. A recovery-curve span below 4 mV produces `N/A`. Capacity, state of health, and safety are outside the measurement. |
 | Curve CSV | Columns are `nominal_time_ms,voltage_V,trigger_us_after_release`. The new third column records the end of the ADC start transaction and is used for the fit. This is a proxy for conversion start. The integration window comes before the nominal read. |
+
+After the first recovery voltage, firmware checks that shunt voltage has returned to within 1 mV of its pre-pulse baseline (10 mA with the default shunt). A failed check stops automatic measurements and invalidates the curve. Disconnect the source and inspect the switch if current persists. This sampled check cannot interrupt a physically stuck switch. Each recovery voltage must also stay within the configured cell range.
 
 Use manual measurements for cell comparisons. Match the cell model, charge state, temperature, fixture, pulse protocol and rest period. The one-second automatic cooldown only limits how often the instrument pulses. For precision work, record stability and use a separate capacity test or AC impedance measurement if those quantities are needed. If a resistance estimate is negative, check contacts and baseline drift before interpretation.
 

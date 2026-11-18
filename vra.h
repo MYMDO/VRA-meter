@@ -9,7 +9,7 @@ enum class ADCStatus : uint8_t;
 
 enum class VRAError : uint8_t {
     None, CellVoltage, LoadedVoltage, CurrentLow, CurrentHigh, ShuntZero,
-    ADCBus, ADCTimeout, ADCSaturated, Timing
+    ResidualCurrent, RecoveryVoltage, ADCBus, ADCTimeout, ADCSaturated, Timing
 };
 
 struct VRAResult {
@@ -19,6 +19,8 @@ struct VRAResult {
     float final_voltage;
     float current;
     float zero_shunt_voltage;
+    float released_shunt_voltage;
+    float recovery_fault_voltage;
     float pulse_resistance;
     float step_resistance;
     float recovery_resistance;
@@ -49,6 +51,7 @@ private:
     bool acquireData(VRAResult &result);
     bool readLoadedVoltage(VRAResult &result);
     bool readLoadCurrent(VRAResult &result);
+    bool checkRecoveryVoltage(float volts, VRAResult &result);
     bool collectRelaxation(unsigned long released, VRAResult &result);
     bool checkADC(ADCStatus status, VRAResult &result);
     void calculateParams(VRAResult &result);
