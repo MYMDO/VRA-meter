@@ -99,8 +99,13 @@ bool VRAAnalyzer::acquireData(VRAResult &result) {
         valid = readLoadCurrent(result);
         if (valid) {
             result.current_trigger_us = adc_.conversionStartedUs() - started;
-            valid = readLoadedVoltage(result);
-            result.loaded_trigger_us = adc_.conversionStartedUs() - started;
+            if (micros() - started >= PULSE_DURATION_US) {
+                result.error = VRAError::Timing;
+                valid = false;
+            } else {
+                valid = readLoadedVoltage(result);
+                result.loaded_trigger_us = adc_.conversionStartedUs() - started;
+            }
         }
     }
     if (valid) waitUntil(started, PULSE_DURATION_US);
@@ -116,7 +121,25 @@ bool VRAAnalyzer::acquireData(VRAResult &result) {
 
     if (!checkADC(adc_.read(ADCChannel::Voltage, result.first_voltage), result)) return false;
     result.first_trigger_us = adc_.conversionStartedUs() - released;
+    if (result.first_trigger_us > MAX_TIMING_OVERRUN_US) {
+        result.error = VRAError::Timing;
+        return false;
+    }
+    if (!checkRecoveryVoltage(result.first_voltage, result)) return false;
+    // Preserve the first voltage conversion and check for a switch still conducting.
+    if (!checkADC(adc_.read(ADCChannel::Current, result.released_shunt_voltage), result)) return false;
+    if (fabsf(result.released_shunt_voltage - result.zero_shunt_voltage) > MAX_ZERO_SHUNT_MV / 1000.0f) {
+        result.error = VRAError::ResidualCurrent;
+        return false;
+    }
     return collectRelaxation(released, result);
+}
+
+bool VRAAnalyzer::checkRecoveryVoltage(float volts, VRAResult &result) {
+    if (voltageInRange(volts)) return true;
+    result.error = VRAError::RecoveryVoltage;
+    result.recovery_fault_voltage = volts;
+    return false;
 }
 
 bool VRAAnalyzer::collectRelaxation(unsigned long released, VRAResult &result) {
@@ -130,8 +153,13 @@ bool VRAAnalyzer::collectRelaxation(unsigned long released, VRAResult &result) {
         }
         if (!checkADC(adc_.startConversion(ADCChannel::Voltage), result)) return false;
         sample_trigger_us_[i] = adc_.conversionStartedUs() - released;
+        if (sample_trigger_us_[i] > start_at + MAX_TIMING_OVERRUN_US) {
+            result.error = VRAError::Timing;
+            return false;
+        }
         waitUntil(released, target);
         if (!checkADC(adc_.readResult(voltage_[i]), result)) return false;
+        if (!checkRecoveryVoltage(voltage_[i], result)) return false;
         if (micros() - released > target + MAX_TIMING_OVERRUN_US) {
             result.error = VRAError::Timing;
             return false;

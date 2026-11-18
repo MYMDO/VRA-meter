@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VERSION "1.2"
+#define VERSION "1.3"
 
 // 5 V, 16 MHz ATmega328P. D7 HIGH turns on the documented low-side N-MOSFET.
 #define MOSFET_PIN              7

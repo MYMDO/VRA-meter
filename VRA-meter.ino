@@ -66,6 +66,13 @@ void printError(const VRAResult &result) {
         case VRAError::ShuntZero:
             printReading(F("ERROR: Shunt not near zero with load off: "), result.zero_shunt_voltage * 1000.0f, 2, F(" mV"));
             break;
+        case VRAError::ResidualCurrent:
+            printReading(F("ERROR: Current persists after release. Disconnect source and inspect switch: "),
+                         (result.released_shunt_voltage - result.zero_shunt_voltage) / SHUNT_RESISTANCE, 3, F(" A"));
+            break;
+        case VRAError::RecoveryVoltage:
+            printReading(F("ERROR: Recovery voltage outside configured range: "), result.recovery_fault_voltage, 3, F(" V"));
+            break;
         case VRAError::ADCBus:
             Serial.println(F("ERROR: ADS1115 bus fault. Check supply, SDA/SCL pull-ups and address."));
             break;
@@ -144,6 +151,14 @@ void loop() {
                 break;
             case '?':
                 printHelp();
+                break;
+            case '\r':
+            case '\n':
+            case ' ':
+            case '\t':
+                break;
+            default:
+                Serial.println(F("Unknown command. Enter ? for help."));
                 break;
         }
         return;
