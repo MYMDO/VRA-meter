@@ -1,187 +1,142 @@
-#include "config.h"
 #include "ads1115.h"
 #include "vra.h"
 
 ADS1115 ads;
-VRA_Analyzer vra;
+VRAAnalyzer vra(ads);
 
-unsigned long measurement_count = 0;
+unsigned long last_attempt_ms = 0;
+bool attempted = false;
 bool auto_mode = false;
+bool csv_available = false;
 
-// ============================================================================
-// Serial Output Helpers
-// ============================================================================
-
-void printSeparator() {
-    Serial.println(F("========================================"));
+void printHelp() {
+    Serial.println(F("VRA Meter v" VERSION " | Single-cell pulse and recovery"));
+    Serial.print(F("Load: "));
+    Serial.print(LOAD_RESISTANCE, 1);
+    Serial.print(F(" Ohm | Pulse: "));
+    Serial.print(PULSE_DURATION_US / 1000);
+    Serial.println(F(" ms"));
+    Serial.println(F("m: Measure | a: Toggle auto | c: Export latest curve CSV | ?: Help"));
 }
 
-void printBanner() {
-    Serial.println();
-    printSeparator();
-    Serial.println(F("  VRA Meter v" VERSION));
-    Serial.println(F("  Voltage Relaxation Analysis"));
-    Serial.println(F("  Single-pulse battery diagnostics"));
-    printSeparator();
-    Serial.println();
-    Serial.print(F("  Shunt: "));     Serial.print(SHUNT_RESISTANCE, 2); Serial.println(F(" Ohm"));
-    Serial.print(F("  Load:  "));     Serial.print(LOAD_RESISTANCE, 1); Serial.println(F(" Ohm"));
-    Serial.print(F("  Pulse: "));     Serial.print(PULSE_DURATION_MS); Serial.println(F(" ms"));
-    Serial.print(F("  Samples: "));   Serial.print(RELAX_SAMPLES); Serial.print(F(" x ")); Serial.print(RELAX_SAMPLE_STEP_MS); Serial.println(F(" ms"));
-    Serial.println();
-    printSeparator();
-    Serial.println();
+void printReading(const __FlashStringHelper *label, float value,
+                  uint8_t digits, const __FlashStringHelper *unit) {
+    Serial.print(label);
+    Serial.print(value, digits);
+    Serial.println(unit);
 }
 
-void printVoltageScale() {
-    Serial.println(F("  Voltage Scale:"));
-    Serial.println(F("  4.20V - 3.90V  = Fully charged"));
-    Serial.println(F("  3.90V - 3.70V  = Nominal"));
-    Serial.println(F("  3.70V - 3.40V  = Discharged"));
-    Serial.println(F("  3.40V - 2.50V  = Deep discharge"));
-    Serial.println();
-}
-
-void printResult(const VRA_Result &r, unsigned long num) {
-    Serial.print(F("--- Measurement #")); Serial.print(num); Serial.println(F(" ---"));
-    Serial.println();
-
-    Serial.println(F("  [Voltage Data]"));
-    Serial.print(F("  V_load     = ")); Serial.print(r.V_before, 4); Serial.println(F(" V  (under load)"));
-    Serial.print(F("  V_instant  = ")); Serial.print(r.V_after, 4);  Serial.println(F(" V  (instant after)"));
-    Serial.print(F("  V_final    = ")); Serial.print(r.V_final, 4);  Serial.println(F(" V  (relaxed)"));
-    Serial.print(F("  ΔV_ohmic   = ")); Serial.print(r.V_after - r.V_before, 4); Serial.println(F(" V"));
-    Serial.print(F("  ΔV_relax   = ")); Serial.print(r.V_relaxation, 4); Serial.println(F(" V"));
-    Serial.println();
-
-    Serial.println(F("  [Current]"));
-    Serial.print(F("  I_load     = ")); Serial.print(r.I_load * 1000.0f, 1); Serial.println(F(" mA"));
-    Serial.print(F("  R_load     = "));
-    if (r.I_load > 0.001f) {
-        Serial.print(r.V_before / r.I_load, 2); Serial.println(F(" Ohm"));
+void printResult(const VRAResult &result) {
+    printReading(F("V_open:     "), result.open_voltage, 4, F(" V"));
+    printReading(F("V_load:     "), result.loaded_voltage, 4, F(" V"));
+    printReading(F("V_first:    "), result.first_voltage, 4, F(" V"));
+    printReading(F("V_final:    "), result.final_voltage, 4, F(" V"));
+    printReading(F("Load current: "), result.current * 1000.0f, 1, F(" mA"));
+    printReading(F("Step R:       "), result.step_resistance * 1000.0f, 1, F(" mOhm"));
+    printReading(F("Recovery R:   "), result.recovery_resistance * 1000.0f, 1, F(" mOhm"));
+    if (result.fit_valid) {
+        printReading(F("Log fit R^2:  "), result.r_squared, 4, F(""));
     } else {
-        Serial.println(F("N/A"));
+        Serial.println(F("Log fit R^2:  N/A (recovery samples span less than the fit threshold)"));
     }
-    Serial.println();
-
-    Serial.println(F("  [Resistance Analysis]"));
-    Serial.print(F("  R_ohm      = ")); Serial.print(r.R_ohm * 1000.0f, 2); Serial.println(F(" mOhm  (AC-IR equivalent)"));
-    Serial.print(F("  R_pol      = ")); Serial.print(r.R_pol * 1000.0f, 2); Serial.println(F(" mOhm  (polarization)"));
-    Serial.print(F("  R_total    = ")); Serial.print((r.R_ohm + r.R_pol) * 1000.0f, 2); Serial.println(F(" mOhm  (total ESR)"));
-    Serial.println();
-
-    Serial.println(F("  [Relaxation Curve Quality]"));
-    Serial.print(F("  R-squared  = ")); Serial.print(r.R_squared, 6);
-    Serial.print(F("  → ")); Serial.println(VRA_Analyzer::getGradeString(r.soh_grade));
-    Serial.println();
-
-    char assessment[80];
-    VRA_Analyzer::getAssessment(r, assessment, sizeof(assessment));
-    Serial.print(F("  Assessment: ")); Serial.println(assessment);
-    Serial.println();
-
-    // Relaxation data points for graphing / export
-    Serial.println(F("  [Relaxation Data]"));
-    Serial.println(F("  t(ms)   V(V)"));
-    for (int i = 0; i < RELAX_SAMPLES; i++) {
-        float t_ms = (float)((i + 1) * RELAX_SAMPLE_STEP_MS);
-        Serial.print(F("  "));
-        Serial.print(t_ms, 0);
-        Serial.print(F("    "));
-        Serial.println(vra.getVoltageSample(i), 4);
+    if (result.step_resistance < 0 || result.recovery_resistance < 0) {
+        Serial.println(F("Negative resistance estimate: check contacts and repeat the test."));
     }
-    Serial.println();
-    printSeparator();
-    Serial.println();
 }
 
-// ============================================================================
-// Setup
-// ============================================================================
+void printError(const VRAResult &result) {
+    switch (result.error) {
+        case VRAError::CellVoltage:
+            printReading(F("ERROR: Cell outside configured voltage range: "), result.open_voltage, 3, F(" V"));
+            break;
+        case VRAError::LoadedVoltage:
+            printReading(F("ERROR: Voltage outside range under load: "), result.loaded_voltage, 3, F(" V"));
+            break;
+        case VRAError::CurrentLow:
+            printReading(F("ERROR: Load current too low. Check load path and shunt polarity: "), result.current, 3, F(" A"));
+            break;
+        case VRAError::CurrentHigh:
+            printReading(F("ERROR: Load current exceeds configured limit: "), result.current, 3, F(" A"));
+            break;
+        case VRAError::ADCBus:
+            Serial.println(F("ERROR: ADS1115 bus fault. Check supply, SDA/SCL pull-ups and address."));
+            break;
+        case VRAError::ADCTimeout:
+            Serial.println(F("ERROR: ADS1115 conversion timed out."));
+            break;
+        case VRAError::ADCSaturated:
+            Serial.println(F("ERROR: ADC input saturated. Check wiring and input range."));
+            break;
+        case VRAError::Timing:
+            Serial.println(F("ERROR: Sampling missed its timing window."));
+            break;
+        case VRAError::None:
+            Serial.println(F("ERROR: Measurement failed."));
+            break;
+    }
+}
+
+void exportCurve() {
+    if (!csv_available) {
+        Serial.println(F("No valid curve. Run a successful measurement first."));
+        return;
+    }
+    Serial.println(F("nominal_time_ms,voltage_V"));
+    for (uint8_t i = 0; i < RELAX_SAMPLES; ++i) {
+        Serial.print((i + 1UL) * RELAX_SAMPLE_STEP_US / 1000);
+        Serial.print(',');
+        Serial.println(vra.voltageSample(i), 5);
+    }
+}
+
+bool cooldownComplete() {
+    return !attempted || millis() - last_attempt_ms >= COOLDOWN_MS;
+}
+
+void runMeasurement() {
+    VRAResult result;
+    csv_available = vra.measure(result);
+    last_attempt_ms = millis();
+    attempted = true;
+    if (csv_available) {
+        printResult(result);
+        return;
+    }
+    printError(result);
+    if (auto_mode) {
+        auto_mode = false;
+        Serial.println(F("Auto mode stopped after measurement error."));
+    }
+}
 
 void setup() {
-    Serial.begin(115200);
-    while (!Serial) { ; }
-
-    // Glitch-free MOSFET init: enable internal pull-up (weak HIGH) first,
-    // then switch to OUTPUT. Prevents a brief LOW→HIGH transition
-    // that would momentarily turn on the load.
-    digitalWrite(MOSFET_PIN, HIGH);
-    pinMode(MOSFET_PIN, OUTPUT);
-
-    ads.begin();
-    vra.begin(ads);
-
-    printBanner();
-    printVoltageScale();
-
-    Serial.println(F("  Ready. Send any character to start measurement."));
-    Serial.println(F("  Send 'a' for auto-mode (continuous measurements)."));
-    Serial.println();
+    vra.begin();
+    Serial.begin(SERIAL_BAUD);
+    printHelp();
 }
 
-// ============================================================================
-// Loop — serial command handler + measurement trigger
-// ============================================================================
-
 void loop() {
-    // Handle serial commands
     if (Serial.available()) {
-        char cmd = Serial.read();
-        if (cmd == 'a' || cmd == 'A') {
-            auto_mode = !auto_mode;
-            Serial.print(F("Auto mode: ")); Serial.println(auto_mode ? F("ON") : F("OFF"));
-            return;  // don't measure on mode toggle
-        }
-    }
-
-    // Manual mode: wait for explicit trigger
-    if (!auto_mode && !Serial.available()) {
-        return;
-    }
-
-    // Pre-measurement voltage check
-    float v_check = ads.readDifferential(ADS1115_CH_VOLTAGE, VOLTAGE_PGA, FS_6144V);
-    Serial.print(F("Battery: ")); Serial.print(v_check, 3); Serial.print(F("V ... "));
-
-    if (v_check < BATTERY_MIN_V) {
-        Serial.println(F("UNDERVOLTAGE - Connect battery!"));
-        delay(2000);
-        return;
-    }
-    if (v_check > BATTERY_MAX_V) {
-        Serial.println(F("OVERVOLTAGE - Disconnect battery!"));
-        delay(2000);
-        return;
-    }
-
-    Serial.println(F("Measuring..."));
-
-    // Run VRA measurement
-    VRA_Result result;
-    if (vra.measure(result)) {
-        measurement_count++;
-        printResult(result, measurement_count);
-    } else {
-        switch (result.error) {
-            case VRA_ERR_ADC_SATURATED:
-                Serial.println(F("ERROR: ADC SATURATED — current > 2.5A (reduce load or use lower shunt)"));
+        switch (Serial.read()) {
+            case 'm':
+            case 'M':
+                if (cooldownComplete()) runMeasurement();
+                else Serial.println(F("Cooling down. Retry in one second."));
                 break;
-            case VRA_ERR_I2C_FAULT:
-                Serial.println(F("ERROR: I2C bus fault — check wiring, pull-ups, and ADS1115 address"));
+            case 'a':
+            case 'A':
+                auto_mode = !auto_mode;
+                Serial.println(auto_mode ? F("Auto mode: ON") : F("Auto mode: OFF"));
                 break;
-            case VRA_ERR_VOLTAGE_RANGE:
-                Serial.println(F("ERROR: Voltage left safe range during test"));
+            case 'c':
+            case 'C':
+                exportCurve();
                 break;
-            default:
-                Serial.println(F("ERROR: Measurement failed"));
+            case '?':
+                printHelp();
                 break;
         }
+        return;
     }
-
-    if (auto_mode) {
-        delay(1000);
-    } else {
-        Serial.println(F("Send any character for next measurement, 'a' for auto-mode."));
-    }
+    if (auto_mode && cooldownComplete()) runMeasurement();
 }
