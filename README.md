@@ -19,8 +19,8 @@ BAT+ → load resistor → MOSFET drain → MOSFET source → shunt → BAT−.
 | I²C | A4 → SDA, A5 → SCL. Use one effective pull-up of about 4.7 kΩ to 5 V on each line, accounting for resistors already on the module. |
 | ADC address | ADDR → GND for the default 0x48. |
 | MOSFET gate | D7 → 330 Ω → gate. Place **10 kΩ from gate to GND** to keep the switch off while the MCU pin is high-impedance. |
-| A0 and A1 | A0 → shunt high side (MOSFET source). A1 → shunt low side. Sense at the resistor terminals. |
-| A2 and A3 | A2 → BAT+, A3 → BAT− using separate voltage-sense wires at the cell terminals. Add 100 kΩ from A2 and another 100 kΩ from A3 to circuit ground to define the open-input voltage. |
+| ADS1115 A0 and A1 | A0 → shunt high side (MOSFET source). A1 → shunt low side. Sense at the resistor terminals. |
+| ADS1115 A2 and A3 | A2 → BAT+, A3 → BAT− using separate voltage-sense wires at the cell terminals. Add 100 kΩ from A2 and another 100 kΩ from A3 to circuit ground to define the open-input voltage. |
 
 Check the MOSFET package pinout. Keep load current out of the sense wires. At 4.25 V, the default 10 Ω resistor and 0.1 Ω shunt draw roughly 0.42 A before losses. The cell must be rated for the configured voltage and current limits and have known condition and polarity. Follow the cell manufacturer's limits if they are stricter.
 
@@ -30,7 +30,7 @@ Hardware references · [ADS1115 datasheet](https://www.ti.com/lit/ds/symlink/ads
 
 ## Build and use
 
-1. Clone the repository and open `VRA-meter/VRA-meter.ino` in Arduino IDE.
+1. Clone the repository into a folder named `VRA-meter` (the folder name must match the sketch). Open `VRA-meter.ino` from that folder in Arduino IDE.
 2. Select Arduino Uno or classic Arduino Nano (ATmega328P) and upload with the cell disconnected. For Nano, select the processor/bootloader corresponding to your board when uploading.
 3. Open Serial Monitor at **115200 baud**. Verify the idle gate state and test first on a current-limited bench supply before connecting a cell.
 
@@ -51,6 +51,20 @@ arduino-cli compile --fqbn arduino:avr:uno --warnings all .
 arduino-cli compile --fqbn arduino:avr:nano:cpu=atmega328 --warnings all .
 ```
 
+### Record one curve
+
+Leave auto mode off for the first run. Send `m` and wait for the result. Save the printed Pulse R, load current and timing, then send `c` before the next measurement. Copy the CSV header and its 30 data rows into a file for plotting. The separate `V_first` reading appears in the serial summary. The CSV starts at nominal 10 ms and ends at 300 ms. To reproduce the firmware's time axis in milliseconds, divide `trigger_us_after_release` by 1000.
+
+### Default measurement settings (v1.3)
+
+| Setting in [config.h](config.h) | Default | How the firmware uses it |
+|---|---|---|
+| `BATTERY_MIN_V`, `BATTERY_MAX_V` | 3.0–4.25 V | Checks open-circuit, loaded and recovery voltage. |
+| `MIN_CURRENT_A`, `MAX_CURRENT_A` | 0.05–0.50 A | Checks the baseline-corrected current during the pulse. |
+| `SHUNT_RESISTANCE` | 0.1 Ω | Converts the measured shunt voltage to current. Use the calibrated shunt value if available. |
+| `PULSE_DURATION_US`, `EARLY_SAMPLE_US`, `FINAL_SAMPLE_LEAD_US` | 200 ms, 5 ms, 7 ms | The early check starts 5 ms after load-on. The late check is scheduled 7 ms before release. Use the printed trigger times when comparing runs. |
+| `RELAX_SAMPLES`, `RELAX_SAMPLE_STEP_US` | 30 samples, 10 ms apart | Defines the scheduled recovery curve after the separate first post-release reading. |
+
 ## Interpret the measurements
 
 | Output | Meaning |
@@ -69,7 +83,7 @@ Use manual measurements for cell comparisons. Match the cell model, charge state
 
 ## Verification and readiness
 
-The firmware has no external Arduino libraries. GitHub Actions compiles Uno and classic Nano and runs host regression tests. Run the host tests locally with `bash tests/run.sh`.
+The firmware has no external Arduino libraries. GitHub Actions compiles Uno and classic Nano and runs host regression tests. Run the host tests from the repository root with `bash tests/run.sh`. The script uses Bash and a C++11 compiler (`c++` by default, or set `CXX`). A successful run prints both `Firmware tests passed.` and `ADS1115 driver tests passed.`
 
 | Bench check | Expected outcome |
 |---|---|
